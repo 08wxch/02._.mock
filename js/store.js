@@ -1114,23 +1114,24 @@ export function nextTeacherCode(db = getDB(), orgId = null, staffRole = 'teacher
   return code;
 }
 
-export function generateStudentPassword(code, org) {
-  return `${normalizeOrgShort(org?.shortName) || 'STU'}${String(code || '').trim()}`;
+export function generateStudentPassword(code) {
+  return String(code || '').trim();
 }
 
-export function generateStudentCode(db = getDB()) {
+export function generateStudentCode(db = getDB(), org = null) {
+  const prefix = normalizeOrgShort(org?.shortName) || 'STU';
   let max = 1000;
   (db.students || []).forEach(student => {
-    const code = String(student.code || '');
-    if (/^\d{4}$/.test(code)) max = Math.max(max, Number(code));
+    const code = String(student.code || '').toUpperCase();
+    const match = code.match(new RegExp(`^${prefix}(\\d{4,})$`));
+    if (match) max = Math.max(max, Number(match[1]));
   });
   let next = max + 1;
-  if (next > 9999) next = 1001;
-  while ((db.students || []).some(s => String(s.code) === String(next))) {
+  const pad = value => `${prefix}${String(value).padStart(4, '0')}`;
+  while ((db.students || []).some(student => String(student.code || '').toUpperCase() === pad(next))) {
     next += 1;
-    if (next > 9999) next = 1001;
   }
-  return String(next).padStart(4, '0');
+  return pad(next);
 }
 
 export function addTeacher({ name, orgId, staffRole = 'teacher', code, password } = {}, actor = null) {
@@ -1288,13 +1289,13 @@ export function addStudent({ name, code, classId, classIds, className, orgId, pa
   const actorTeacher = currentTeacher(actor);
   if (!actorTeacher) return { ok: false, error: 'ต้องเข้าสู่ระบบด้วยบัญชีครูจึงเพิ่มนักเรียนได้' };
   const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
-  const cleanCode = String(code || '').trim();
   const owner = isOwnerTeacher(actor);
   let org = owner ? findOrganization(orgId, db) : findOrganization(actorTeacher.orgId, db);
   if (!org) org = findOrganization(actorTeacher.orgId, db) || (db.organizations || [])[0];
   if (!org) return { ok: false, error: 'ไม่พบหน่วยงานหรือโรงเรียน' };
   if (!cleanName) return { ok: false, error: 'กรุณากรอกชื่อ–นามสกุล' };
-  if (!cleanCode) return { ok: false, error: 'กรุณากรอกรหัสนักเรียน' };
+  let cleanCode = String(code || '').trim().toUpperCase();
+  if (!cleanCode) cleanCode = generateStudentCode(db, org);
   if (cleanCode.length < 3) return { ok: false, error: 'รหัสนักเรียนต้องมีอย่างน้อย 3 ตัวอักษร' };
   if (db.students.some(s => String(s.code).toLowerCase() === cleanCode.toLowerCase())) {
     return { ok: false, error: 'รหัสนักเรียนนี้มีอยู่ในทะเบียนแล้ว' };
@@ -1306,7 +1307,7 @@ export function addStudent({ name, code, classId, classIds, className, orgId, pa
     if (cls) ids = [cls.id];
   }
   if (!ids.length) return { ok: false, error: `กรุณาเลือก class ของ ${org.name} อย่างน้อย 1 class` };
-  const cleanPassword = String(password || generateStudentPassword(cleanCode, org)).trim();
+  const cleanPassword = String(password || generateStudentPassword(cleanCode)).trim();
   if (cleanPassword.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
   const student = {
     id: uid('stu'),

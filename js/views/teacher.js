@@ -1524,8 +1524,8 @@ function openClassManager(session, initialOrgId = '') {
 }
 
 function studentCodeDefaults(org, db) {
-  const code = generateStudentCode(db);
-  return { code, password: generateStudentPassword(code, org) };
+  const code = generateStudentCode(db, org);
+  return { code, password: generateStudentPassword(code) };
 }
 
 function openAddStudentModal(session, defaultOrgId = '') {
@@ -1558,15 +1558,15 @@ function openAddStudentModal(session, defaultOrgId = '') {
       <div class="field">
         <label for="new-student-code">รหัสนักเรียน</label>
         <div class="code-generate-row">
-          <input class="input input--lg" id="new-student-code" name="code" placeholder="เช่น 1001" autocomplete="off" inputmode="numeric" value="${e(initial.code)}">
+          <input class="input input--lg" id="new-student-code" name="code" placeholder="เช่น SAT1001" autocomplete="off" value="${e(initial.code)}">
           <button class="btn btn--ghost" type="button" data-generate-student-code>${icon('key', 14)} สร้างรหัส</button>
         </div>
-        <span class="field__hint">ระบบสร้างรหัส 4 หลักให้ หรือแก้ไขเป็นรหัสของโรงเรียนได้</span>
+        <span class="field__hint">ค่าเริ่มต้น = ชื่อย่อหน่วยงาน + เลข 4 หลัก เช่น SAT1001 · แก้ไขได้</span>
       </div>
       <div class="field">
         <label for="new-student-password">รหัสผ่านเริ่มต้น</label>
         <input class="input input--lg" id="new-student-password" name="password" value="${e(initial.password)}" autocomplete="off">
-        <span class="field__hint">ค่าเริ่มต้น = ชื่อย่อหน่วยงาน + รหัสนักเรียน · แก้ไขได้ และนักเรียนเปลี่ยนเองได้ภายหลัง</span>
+        <span class="field__hint">ค่าเริ่มต้น = รหัสนักเรียน · แก้ไขได้ และนักเรียนเปลี่ยนเองได้ภายหลัง</span>
       </div>
       <div class="field">
         <div class="field__label-row"><span class="field__label">class ของนักเรียน *</span><span class="field__hint">เลือกได้มากกว่า 1 class</span></div>
@@ -1615,7 +1615,7 @@ function openAddStudentModal(session, defaultOrgId = '') {
       });
       passwordInput?.addEventListener('input', () => { passwordTouched = true; });
       codeInput?.addEventListener('input', () => {
-        if (!passwordTouched) passwordInput.value = generateStudentPassword(codeInput.value, selectedOrg());
+        if (!passwordTouched) passwordInput.value = generateStudentPassword(codeInput.value);
       });
       orgSelect?.addEventListener('change', () => {
         refreshClasses();
