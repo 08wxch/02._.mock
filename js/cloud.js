@@ -379,17 +379,19 @@ async function persistSnapshot(state, attempts) {
       const key = `${role}:${person.id}`;
       return lastPeople.get(key) !== personSignature(person, role);
     });
+    let accountsOk = true;
     if (changedPeople.length) {
       try {
         await syncAccounts(changedPeople);
       } catch (err) {
+        accountsOk = false;
         console.error('Account provisioning failed', err);
         window.dispatchEvent(new CustomEvent('examio:cloud-error', {
           detail: { message: err?.message || 'สร้างบัญชีเข้าสู่ระบบไม่สำเร็จ' }
         }));
       }
     }
-    rememberPeople(state);
+    if (accountsOk) rememberPeople(state);
   }
 
   const changed = attempts.filter(a => lastAttempts.get(a.id) !== nextMap.get(a.id));

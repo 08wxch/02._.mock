@@ -97,6 +97,14 @@ async function upsertAccount(person: any, caller: any) {
   };
   const { error: upsertError } = await admin.from('profiles').upsert(row, { onConflict: 'user_id' });
   if (upsertError) throw upsertError;
+  if (password.length >= 4) {
+    const { error: credentialError } = await admin.from('credentials').upsert({
+      owner_type: role,
+      owner_id: id,
+      password
+    }, { onConflict: 'owner_type,owner_id' });
+    if (credentialError) throw credentialError;
+  }
   return { id, role, email, user_id: userId };
 }
 
@@ -173,6 +181,12 @@ serve(async (req) => {
       }
       const { error } = await admin.auth.admin.updateUserById(profile.user_id, { password });
       if (error) throw error;
+      const { error: credentialError } = await admin.from('credentials').upsert({
+        owner_type: role,
+        owner_id: id,
+        password
+      }, { onConflict: 'owner_type,owner_id' });
+      if (credentialError) throw credentialError;
       return json({ ok: true });
     }
 
