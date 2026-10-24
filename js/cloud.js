@@ -9,6 +9,7 @@ let ready = false;
 let lastStamp = '';
 let lastAttempts = new Map();
 let lastCredentials = new Map();
+let lastStateCounts = { students: 0, exams: 0 };
 let saveQueue = Promise.resolve();
 let saveCount = 0;
 let lastLocalSaveAt = 0;
@@ -26,6 +27,23 @@ function getClient() {
   }
   if (!client) throw new Error('ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้');
   return client;
+}
+
+
+function countsOf(db) {
+  return {
+    students: Array.isArray(db?.students) ? db.students.length : 0,
+    exams: Array.isArray(db?.exams) ? db.exams.length : 0
+  };
+}
+
+// A partial local snapshot (for example after a failed refresh or a newly
+// created org) must never be allowed to erase the central roster/exams.
+function isDangerousShrink(next, previous) {
+  if (!previous) return false;
+  if (previous.students >= 10 && next.students < Math.max(5, Math.floor(previous.students * 0.5))) return true;
+  if (previous.exams >= 3 && next.exams < Math.max(2, Math.floor(previous.exams * 0.5))) return true;
+  return false;
 }
 
 function classIdsOf(student) {
@@ -87,6 +105,7 @@ async function loadCloudDB() {
   db.attempts = (attemptsResult.data || []).map(row => row.data).filter(Boolean);
   lastAttempts = new Map(db.attempts.map(a => [a.id, JSON.stringify(a)]));
   lastStamp = stateResult.data.updated_at || '';
+  lastStateCounts = countsOf(db);
 
   if (current?.role === 'teacher') {
     const credResult = await supa.from('credentials').select('owner_type,owner_id,password');
@@ -286,8 +305,13 @@ async function persistSnapshot(state, attempts) {
   lastLocalSaveAt = Date.now();
 
   if (current?.role === 'teacher') {
+    const incoming = countsOf(state);
+    if (isDangerousShrink(incoming, lastStateCounts)) {
+      throw new Error('ปฏิเสธการบันทึก: ข้อมูลนักเรียนหรือชุดสอบลดลงผิดปกติ');
+    }
     const { error } = await supa.from('app_state').upsert({ id: 'main', data: cleanState(state) });
     if (error) throw error;
+    lastStateCounts = incoming;
     const credentialRows = [
       ...(state.teachers || []).filter(t => t.password).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
       ...(state.students || []).filter(s => s.password).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
@@ -299,7 +323,11 @@ async function persistSnapshot(state, attempts) {
   }
 
   const changed = attempts.filter(a => lastAttempts.get(a.id) !== nextMap.get(a.id));
-  const removed = [...lastAttempts.keys()].filter(id => !nextMap.has(id));
+  // Never mass-delete attempts when the local snapshot has no exams; that is
+  // almost always a partially loaded state, not a teacher deleting everything.
+  const removed = (state.exams || []).length === 0
+    ? []
+    : [...lastAttempts.keys()].filter(id => !nextMap.has(id));
 
   if (changed.length) {
     const { error } = await supa.from('attempts').upsert(changed.map(attemptRow));
@@ -348,9 +376,18 @@ export async function cloudRefresh() {
   if (stamp === lastStamp && !attemptsChanged) return null;
 
   const db = stateResult.data.data;
+  const incoming = countsOf(db);
+  if (isDangerousShrink(incoming, lastStateCounts)) {
+    console.warn('Rejected partial cloud snapshot', incoming, lastStateCounts);
+    window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+      detail: { message: 'พบข้อมูลกลางผิดปกติ จึงยังใช้ข้อมูลในเครื่องก่อน' }
+    }));
+    return null;
+  }
   db.attempts = rows.map(row => row.data).filter(Boolean);
   lastAttempts = nextMap;
   lastStamp = stamp;
+  lastStateCounts = incoming;
   return db;
 }
 
