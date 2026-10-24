@@ -1,4 +1,5 @@
 import { normalize, uid, answerIsEmpty } from './utils.js';
+import { cloudSave } from './cloud.js';
 
 export const DB_KEY = 'examio_demo_db_v2';
 export const SESSION_KEY = 'examio_demo_session_v2';
@@ -862,6 +863,10 @@ export function getDB() {
   return database || loadDB();
 }
 
+export function replaceDB(next) {
+  if (next) database = next;
+}
+
 export function persist() {
   if (!database) return;
   try {
@@ -874,6 +879,7 @@ export function persist() {
 export function saveDB() {
   persist();
   window.dispatchEvent(new CustomEvent('examio:datachange'));
+  if (database) cloudSave(database);
 }
 
 export function resetDB() {

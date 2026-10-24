@@ -1,7 +1,8 @@
 import { icon, brandMark } from '../icons.js';
 import { e, thaiDate, thaiTime, formatDuration } from '../utils.js';
 import { brand, toast, openModal, closeModal } from '../ui.js';
-import { getDB, setSession, clearSession, classIdsOf, studentClassLabel, findStudentByLogin, findTeacherByLogin } from '../store.js';
+import { getDB, setSession, clearSession, classIdsOf, studentClassLabel, replaceDB } from '../store.js';
+import { cloudLogin, cloudGuestLogin, cloudLogout } from '../cloud.js';
 import { navigate } from '../router.js';
 
 function authLiveStats(db = null) {
@@ -20,12 +21,6 @@ function authLiveStats(db = null) {
 }
 
 function readLiveDB() {
-  try {
-    const raw = localStorage.getItem('examio_demo_db_v2');
-    if (raw) return JSON.parse(raw);
-  } catch (err) {
-    console.warn('Unable to read live login stats', err);
-  }
   return getDB();
 }
 
@@ -74,7 +69,7 @@ function authVisual(db = null) {
       </div>
     </div>
     <div class="auth-visual__foot">
-      <span>${icon('shield-check', 12)} ข้อมูลสอบถูกเก็บไว้ในเครื่องนี้</span>
+      <span>${icon('shield-check', 12)} ข้อมูลสอบซิงก์ออนไลน์อย่างปลอดภัย</span>
       <span>© 2569 02._.mock</span>
     </div>
   </section>`;
@@ -131,6 +126,10 @@ export function authView(ctx) {
   const db = getDB();
   const sharedCode = (ctx.query.get('code') || '').replace(/\D/g, '').slice(0, 6);
   const forceFresh = ctx.query.get('fresh') === '1' || Boolean(sharedCode);
+  let freshSignOut = Promise.resolve();
+  if (forceFresh) {
+    freshSignOut = cloudLogout().catch(err => console.warn('Cloud sign out failed', err));
+  }
   const session = ctx.session;
   // A valid session should never be destroyed just because the login route was
   // opened (for example after an in-app refresh or a browser back action).
@@ -166,7 +165,7 @@ export function authView(ctx) {
       <div class="auth-card">
         <div class="auth-mobile-brand">
           ${brand({ href: '#/login' })}
-          <span class="badge badge--neutral">${icon('shield-check', 12)} ข้อมูลอยู่ในเครื่อง</span>
+          <span class="badge badge--neutral">${icon('shield-check', 12)} ข้อมูลซิงก์ออนไลน์</span>
         </div>
         <div class="auth-card__intro">
           <div class="eyebrow">ยินดีต้อนรับ</div>
@@ -417,7 +416,7 @@ export function authView(ctx) {
         onMount(overlay) {
           const select = overlay.querySelector('#guest-student');
           const error = overlay.querySelector('[data-guest-error]');
-          const submit = () => {
+          const submit = async () => {
             const student = roster.find(s => s.id === select.value);
             if (!student) {
               error.querySelector('span').textContent = 'กรุณาเลือกชื่อของคุณจากรายชื่อ';
@@ -426,16 +425,20 @@ export function authView(ctx) {
               select.focus();
               return;
             }
-            setSession({
-              role: 'student',
-              studentId: student.id,
-              name: student.name,
-              studentCode: student.code,
-              class: studentClassLabel(student, db),
-              orgId: student.orgId,
-              loginMethod: 'code',
-              examId: exam.id
-            });
+            const confirmBtn = overlay.querySelector('[data-guest-confirm]');
+            if (confirmBtn.disabled) return;
+            confirmBtn.disabled = true;
+            error.classList.remove('is-visible');
+            await freshSignOut;
+            const result = await cloudGuestLogin(exam.id, student.id);
+            if (!result.ok) {
+              confirmBtn.disabled = false;
+              error.querySelector('span').textContent = result.error || 'ยืนยันตัวตนไม่สำเร็จ';
+              error.classList.add('is-visible');
+              return;
+            }
+            setSession(result.session);
+            replaceDB(result.db);
             closeModal();
             toast('ยืนยันตัวตนสำเร็จ อ่านคำชี้แจงก่อนเริ่มสอบ', 'success');
             navigate(`/student/exam/${exam.id}/instructions`);
@@ -451,58 +454,66 @@ export function authView(ctx) {
     }
 
     // Account login
-    page.querySelector('#account-form').addEventListener('submit', ev => {
+    page.querySelector('#account-form').addEventListener('submit', async ev => {
       ev.preventDefault();
       const code = page.querySelector('#student-code').value.trim();
       const password = page.querySelector('#student-password').value;
       const error = page.querySelector('[data-account-error]');
-      const student = findStudentByLogin(code, db);
-      if (!student || student.password !== password) {
-        error.querySelector('span').textContent = 'รหัสนักเรียน/ชื่อ หรือรหัสผ่านไม่ถูกต้อง';
+      const submitBtn = page.querySelector('#account-form button[type="submit"]');
+      if (!code) {
+        error.querySelector('span').textContent = 'กรุณากรอกรหัสนักเรียนหรือชื่อ–นามสกุล';
+        error.classList.add('is-visible');
+        return;
+      }
+      submitBtn.disabled = true;
+      error.classList.remove('is-visible');
+      await freshSignOut;
+      const result = await cloudLogin(code, password);
+      if (!result.ok || result.session.role !== 'student') {
+        if (result.ok) await cloudLogout();
+        submitBtn.disabled = false;
+        error.querySelector('span').textContent = result.error || 'รหัสนักเรียน/ชื่อ หรือรหัสผ่านไม่ถูกต้อง';
         error.classList.add('is-visible');
         page.querySelector('#student-code').setAttribute('aria-invalid', 'true');
         return;
       }
-      error.classList.remove('is-visible');
-      setSession({
-        role: 'student',
-        studentId: student.id,
-        name: student.name,
-        studentCode: student.code,
-        class: studentClassLabel(student, db),
-        orgId: student.orgId,
-        loginMethod: 'account'
-      });
-      toast(`ยินดีต้อนรับ ${student.name}`, 'success');
-      navigate('/student');
+      setSession(result.session);
+      replaceDB(result.db);
+      toast(`ยินดีต้อนรับ ${result.session.name}`, 'success');
+      const sharedExam = sharedCode
+        ? (result.db.exams || []).find(exam => exam.code === sharedCode && exam.status === 'open')
+        : null;
+      navigate(sharedExam ? `/student/exam/${sharedExam.id}/instructions` : '/student');
     });
 
     // Teacher login by staff code or full name
-    page.querySelector('#teacher-form').addEventListener('submit', ev => {
+    page.querySelector('#teacher-form').addEventListener('submit', async ev => {
       ev.preventDefault();
       const identifier = page.querySelector('#teacher-identifier').value.trim();
       const password = page.querySelector('#teacher-password').value;
       const error = page.querySelector('[data-teacher-error]');
-      const teacherAccount = findTeacherByLogin(identifier, db);
-      if (!teacherAccount || teacherAccount.password !== password) {
-        error.querySelector('span').textContent = 'รหัสครู ชื่อ–นามสกุล หรือรหัสผ่านไม่ถูกต้อง';
+      const submitBtn = page.querySelector('#teacher-form button[type="submit"]');
+      if (!identifier) {
+        error.querySelector('span').textContent = 'กรุณากรอกรหัสครูหรือชื่อ–นามสกุล';
+        error.classList.add('is-visible');
+        return;
+      }
+      submitBtn.disabled = true;
+      error.classList.remove('is-visible');
+      await freshSignOut;
+      const result = await cloudLogin(identifier, password);
+      if (!result.ok || result.session.role !== 'teacher') {
+        if (result.ok) await cloudLogout();
+        submitBtn.disabled = false;
+        error.querySelector('span').textContent = result.error || 'รหัสครู ชื่อ–นามสกุล หรือรหัสผ่านไม่ถูกต้อง';
         error.classList.add('is-visible');
         page.querySelector('#teacher-identifier').setAttribute('aria-invalid', 'true');
         return;
       }
-      error.classList.remove('is-visible');
       page.querySelector('#teacher-identifier').removeAttribute('aria-invalid');
-      setSession({
-        role: 'teacher',
-        teacherId: teacherAccount.id,
-        name: teacherAccount.name,
-        teacherCode: teacherAccount.code,
-        school: teacherAccount.school,
-        orgId: teacherAccount.orgId,
-        staffRole: teacherAccount.staffRole,
-        loginMethod: 'account'
-      });
-      toast(`ยินดีต้อนรับ ${teacherAccount.name}`, 'success');
+      setSession(result.session);
+      replaceDB(result.db);
+      toast(`ยินดีต้อนรับ ${result.session.name}`, 'success');
       navigate('/teacher');
     });
 

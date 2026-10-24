@@ -16,6 +16,7 @@ import {
   isCorrect, rankAttempts, currentStudentKey, saveDB, answerText,
   correctAnswerText, isStudentAssigned, studentClassLabel
 } from '../store.js';
+import { cloudLogout } from '../cloud.js';
 import { mathText } from '../math.js';
 import { navigate, refreshRoute } from '../router.js';
 import { openAccountProfile } from '../profile.js';
@@ -112,6 +113,7 @@ function mountStudentShell(session) {
       iconName: 'logout'
     });
     if (!ok) return;
+    await cloudLogout();
     clearSession();
     navigate('/login');
     toast('ออกจากระบบแล้ว', 'info', 2000);

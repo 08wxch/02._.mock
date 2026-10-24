@@ -1,5 +1,6 @@
 import { parseRoute, navigate, refreshRoute } from './router.js';
-import { getDB, getSession, sweepExpiredAttempts, loadDB, reloadDB, currentTeacher } from './store.js';
+import { getDB, getSession, setSession, clearSession, sweepExpiredAttempts, loadDB, reloadDB, currentTeacher, replaceDB } from './store.js';
+import { cloudRestore, cloudRefresh, isCloudEnabled, isCloudReady } from './cloud.js';
 import { authView } from './views/auth.js';
 import {
   studentDashboardView, instructionsView, examView, successView,
@@ -17,6 +18,22 @@ import { closeModal, toast } from './ui.js';
 const app = document.getElementById('app');
 let currentCleanup = null;
 let isRendering = false;
+
+// Restore the Supabase session before the first render. A stale local session
+// must not send the user into a workspace that the database will reject.
+let cloudBootError = null;
+try {
+  const restored = await cloudRestore();
+  if (restored) {
+    setSession(restored.session);
+    replaceDB(restored.db);
+  } else if (isCloudEnabled()) {
+    clearSession();
+  }
+} catch (err) {
+  cloudBootError = err;
+  console.error('Cloud restore failed', err);
+}
 
 function setTitle(title) {
   document.title = title ? `${title} · 02._.mock` : '02._.mock — ระบบสอบออนไลน์';
@@ -210,9 +227,40 @@ setInterval(() => {
 }, 30_000);
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) sweepExpiredAttempts();
+  if (!document.hidden) {
+    sweepExpiredAttempts();
+    refreshFromCloud();
+  }
 });
+
+window.addEventListener('examio:cloud-error', (ev) => {
+  toast(ev.detail?.message || 'เชื่อมต่อคลาวด์ไม่สำเร็จ', 'error', 5000);
+});
+
+let cloudRefreshBusy = false;
+async function refreshFromCloud() {
+  if (cloudRefreshBusy || !isCloudReady() || !getSession()) return;
+  const hash = window.location.hash;
+  if (hash.includes('/take') || hash.includes('/review') || hash.includes('/answers') || hash.includes('/create') || hash.includes('/edit')) return;
+  cloudRefreshBusy = true;
+  try {
+    const next = await cloudRefresh();
+    if (next) {
+      replaceDB(next);
+      sweepExpiredAttempts();
+      refreshRoute({ scroll: false });
+    }
+  } catch (err) {
+    console.warn('Cloud refresh failed', err);
+  } finally {
+    cloudRefreshBusy = false;
+  }
+}
+setInterval(refreshFromCloud, 5000);
 
 loadDB();
 sweepExpiredAttempts();
 renderRoute();
+if (cloudBootError) {
+  toast('เชื่อมต่อฐานข้อมูลกลางไม่ได้ — กำลังใช้ข้อมูลสำรองในเครื่อง', 'warning', 6000);
+}
