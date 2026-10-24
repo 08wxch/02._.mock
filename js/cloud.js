@@ -414,15 +414,7 @@ export async function cloudSetPassword(role, id, password) {
   if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
   const next = String(password || '');
   if (next.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
-  const isSelf = current.role === role
-    && (role === 'teacher' ? current.teacher_id === id : current.student_id === id);
   try {
-    if (isSelf) {
-      const supa = getClient();
-      const { error } = await supa.auth.updateUser({ password: next });
-      if (error) throw error;
-      return { ok: true };
-    }
     const body = await callAccounts({ action: 'password', role, id, password: next });
     return body.ok === false ? { ok: false, error: body.error } : { ok: true };
   } catch (err) {

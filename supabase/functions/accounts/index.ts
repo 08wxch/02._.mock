@@ -108,28 +108,42 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization') || '';
     if (!authHeader.startsWith('Bearer ')) return json({ error: 'missing session' }, 401);
 
+    // Verify the JWT through PostgREST/RLS instead of auth.getUser().
+    // getUser() rejects otherwise-valid access tokens when their session was
+    // rotated (session_not_found), which made account provisioning fail for
+    // teachers whose tab had been open for a while.
+    let userId = '';
+    try {
+      const token = authHeader.slice(7);
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      userId = String(payload.sub || '');
+    } catch {
+      return json({ error: 'invalid session' }, 401);
+    }
+    if (!userId) return json({ error: 'invalid session' }, 401);
+
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
+      global: { headers: { Authorization: authHeader, apikey: ANON_KEY } },
       auth: { persistSession: false, autoRefreshToken: false }
     });
-    const { data: authData, error: authError } = await userClient.auth.getUser();
-    if (authError || !authData?.user) return json({ error: 'invalid session' }, 401);
-
-    const { data: callerProfile, error: callerError } = await admin
+    const { data: callerProfile, error: callerError } = await userClient
       .from('profiles')
       .select('role, teacher_id, student_id, org_id')
-      .eq('user_id', authData.user.id)
+      .eq('user_id', userId)
       .maybeSingle();
-    if (callerError || !callerProfile || callerProfile.role !== 'teacher') {
+    if (callerError || !callerProfile) {
       return json({ error: 'teacher account required' }, 403);
     }
-
+    const callerIsTeacher = callerProfile.role === 'teacher';
     const { data: state } = await admin.from('app_state').select('data').eq('id', 'main').maybeSingle();
-    const callerTeacher = (state?.data?.teachers || []).find((t: any) => t.id === callerProfile.teacher_id);
+    const callerTeacher = callerIsTeacher
+      ? (state?.data?.teachers || []).find((t: any) => t.id === callerProfile.teacher_id)
+      : null;
     const caller = { ...callerProfile, is_owner: Boolean(callerTeacher?.isOwner) };
 
     const body = await req.json().catch(() => ({}));
     if (body.action === 'sync') {
+      if (!callerIsTeacher) return json({ error: 'teacher account required' }, 403);
       const people = Array.isArray(body.people) ? body.people.slice(0, 100) : [];
       const results = [];
       for (const person of people) {
@@ -150,6 +164,7 @@ serve(async (req) => {
       const isSelf = role === 'teacher'
         ? callerProfile.teacher_id === id
         : callerProfile.student_id === id;
+      if (!isSelf && !callerIsTeacher) return json({ error: 'forbidden' }, 403);
       const column = role === 'teacher' ? 'teacher_id' : 'student_id';
       const { data: profile } = await admin.from('profiles').select('user_id, org_id').eq(column, id).maybeSingle();
       if (!profile?.user_id) return json({ error: 'account not provisioned' }, 404);
