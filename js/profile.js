@@ -1,4 +1,5 @@
 import { icon } from './icons.js';
+import { cloudSetPassword } from './cloud.js';
 import { e } from './utils.js';
 import { avatar, toast, openModal, closeModal, mountCopyButtons } from './ui.js';
 import {
@@ -86,16 +87,28 @@ export function openAccountProfile({ kind = 'teacher', personId, session, title 
         form?.setAttribute('hidden', '');
         form?.reset();
       });
-      form?.addEventListener('submit', ev => {
+      form?.addEventListener('submit', async ev => {
         ev.preventDefault();
         const next = String(new FormData(form).get('password') || '');
         const confirm = String(new FormData(form).get('confirm') || '');
         if (next !== confirm) { toast('รหัสผ่านทั้งสองช่องไม่ตรงกัน', 'error'); return; }
+        const previous = person.password;
         const result = isTeacher
           ? setTeacherPassword(person.id, next, session)
           : setStudentPassword(person.id, next, session);
         if (!result.ok) { toast(result.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ', 'error'); return; }
         person.password = next;
+        const submit = form.querySelector('button[type=submit]');
+        if (submit) submit.disabled = true;
+        const cloud = await cloudSetPassword(isTeacher ? 'teacher' : 'student', person.id, next);
+        if (submit) submit.disabled = false;
+        if (!cloud.ok) {
+          if (isTeacher) setTeacherPassword(person.id, previous, session);
+          else setStudentPassword(person.id, previous, session);
+          person.password = previous;
+          toast(cloud.error || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ กรุณาลองใหม่', 'error', 6000);
+          return;
+        }
         visible = false;
         if (secret) secret.textContent = maskPassword(next);
         if (reveal) { reveal.innerHTML = icon('eye', 15); reveal.setAttribute('aria-label', 'เปิดดูรหัสผ่าน'); }

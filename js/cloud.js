@@ -2,6 +2,7 @@
 // The anon key is public by design; all access is guarded by RLS.
 const SUPABASE_URL = 'https://hqpbvxmrolxhuexzzxgo.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhxcGJ2eG1yb2x4aHVleHp6eGdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3Nzc0NjMsImV4cCI6MjEwODM1MzQ2M30.HsBV5_KXdWadINtL17tIIgiHLbi28t_nU6jsJ1qoDD8';
+const ACCOUNTS_URL = `${SUPABASE_URL}/functions/v1/accounts`;
 
 let client = null;
 let current = null;
@@ -10,6 +11,7 @@ let lastStamp = '';
 let lastAttempts = new Map();
 let lastCredentials = new Map();
 let lastStateCounts = { students: 0, exams: 0 };
+let lastPeople = new Map();
 let saveQueue = Promise.resolve();
 let saveCount = 0;
 let lastLocalSaveAt = 0;
@@ -91,6 +93,57 @@ function toLocalSession(profile, db) {
   };
 }
 
+
+function personSignature(person, role) {
+  return [role, person.id, person.code || '', person.name || '', person.orgId || '', person.password || ''].join('|');
+}
+
+function peopleFromDB(db) {
+  return [
+    ...(db.teachers || []).filter(p => !p.deletedAt).map(person => ({ person, role: 'teacher' })),
+    ...(db.students || []).filter(p => !p.deletedAt).map(person => ({ person, role: 'student' }))
+  ];
+}
+
+async function callAccounts(payload) {
+  const supa = getClient();
+  const { data: { session } } = await supa.auth.getSession();
+  if (!session?.access_token) throw new Error('ไม่พบ session สำหรับจัดการบัญชี');
+  const response = await fetch(ACCOUNTS_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || 'จัดการบัญชีเข้าสู่ระบบไม่สำเร็จ');
+  return body;
+}
+
+async function syncAccounts(people) {
+  if (!people.length) return;
+  const body = await callAccounts({
+    action: 'sync',
+    people: people.map(({ person, role }) => ({
+      role,
+      id: person.id,
+      code: person.code,
+      name: person.name,
+      orgId: person.orgId,
+      password: person.password
+    }))
+  });
+  const failed = (body.results || []).filter(r => !r.ok);
+  if (failed.length) throw new Error(failed[0].error || 'สร้างบัญชีเข้าสู่ระบบไม่สำเร็จ');
+}
+
+function rememberPeople(db) {
+  lastPeople = new Map(peopleFromDB(db).map(({ person, role }) => [`${role}:${person.id}`, personSignature(person, role)]));
+}
+
 async function loadCloudDB() {
   const supa = getClient();
   const [stateResult, attemptsResult] = await Promise.all([
@@ -116,6 +169,7 @@ async function loadCloudDB() {
       }
     }
   }
+  rememberPeople(db);
   ready = true;
   return db;
 }
@@ -320,6 +374,22 @@ async function persistSnapshot(state, attempts) {
       const { error: credError } = await supa.from('credentials').upsert(credentialRows);
       if (credError) throw credError;
     }
+
+    const changedPeople = peopleFromDB(state).filter(({ person, role }) => {
+      const key = `${role}:${person.id}`;
+      return lastPeople.get(key) !== personSignature(person, role);
+    });
+    if (changedPeople.length) {
+      try {
+        await syncAccounts(changedPeople);
+      } catch (err) {
+        console.error('Account provisioning failed', err);
+        window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+          detail: { message: err?.message || 'สร้างบัญชีเข้าสู่ระบบไม่สำเร็จ' }
+        }));
+      }
+    }
+    rememberPeople(state);
   }
 
   const changed = attempts.filter(a => lastAttempts.get(a.id) !== nextMap.get(a.id));
@@ -338,6 +408,26 @@ async function persistSnapshot(state, attempts) {
     if (error) throw error;
   }
   lastAttempts = nextMap;
+}
+
+export async function cloudSetPassword(role, id, password) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  const next = String(password || '');
+  if (next.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
+  const isSelf = current.role === role
+    && (role === 'teacher' ? current.teacher_id === id : current.student_id === id);
+  try {
+    if (isSelf) {
+      const supa = getClient();
+      const { error } = await supa.auth.updateUser({ password: next });
+      if (error) throw error;
+      return { ok: true };
+    }
+    const body = await callAccounts({ action: 'password', role, id, password: next });
+    return body.ok === false ? { ok: false, error: body.error } : { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ' };
+  }
 }
 
 export function cloudSave(db) {
@@ -388,6 +478,7 @@ export async function cloudRefresh() {
   lastAttempts = nextMap;
   lastStamp = stamp;
   lastStateCounts = incoming;
+  rememberPeople(db);
   return db;
 }
 

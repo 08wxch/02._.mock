@@ -1,4 +1,5 @@
 import { icon } from '../icons.js';
+import { cloudSetPassword } from '../cloud.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, shortThaiDate, longThaiDate,
   relativeTime, formatNumber, formatStopwatch, percent, clamp,
@@ -2014,14 +2015,25 @@ function openStaffDetailModal(teacherId, session) {
         passwordForm?.setAttribute('hidden', '');
         passwordForm?.reset();
       });
-      passwordForm?.addEventListener('submit', ev => {
+      passwordForm?.addEventListener('submit', async ev => {
         ev.preventDefault();
         const data = new FormData(passwordForm);
         const next = String(data.get('password') || '');
         if (next !== String(data.get('confirm') || '')) { toast('รหัสผ่านทั้งสองช่องไม่ตรงกัน', 'error'); return; }
+        const previous = teacher.password;
         const result = setTeacherPassword(teacher.id, next, session);
         if (!result.ok) { toast(result.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ', 'error'); return; }
         teacher.password = next;
+        const submit = passwordForm.querySelector('button[type=submit]');
+        if (submit) submit.disabled = true;
+        const cloud = await cloudSetPassword('teacher', teacher.id, next);
+        if (submit) submit.disabled = false;
+        if (!cloud.ok) {
+          setTeacherPassword(teacher.id, previous, session);
+          teacher.password = previous;
+          toast(cloud.error || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ กรุณาลองใหม่', 'error', 6000);
+          return;
+        }
         if (secret) secret.textContent = maskStaffPassword(next);
         visible = false;
         if (reveal) reveal.innerHTML = icon('eye', 15);
