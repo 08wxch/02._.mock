@@ -412,6 +412,18 @@ async function persistSnapshot(state, attempts) {
   lastAttempts = nextMap;
 }
 
+export async function cloudGetPassword(role, id) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  try {
+    const body = await callAccounts({ action: 'reveal', role, id });
+    const password = String(body.password || '');
+    if (!password) return { ok: false, error: 'ไม่พบรหัสผ่านของบัญชีนี้' };
+    return { ok: true, password };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'ดูรหัสผ่านไม่สำเร็จ' };
+  }
+}
+
 export async function cloudSetPassword(role, id, password) {
   if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
   const next = String(password || '');

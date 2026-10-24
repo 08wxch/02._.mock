@@ -164,6 +164,28 @@ serve(async (req) => {
       return json({ ok: results.every(r => r.ok), results });
     }
 
+    if (body.action === 'reveal') {
+      const role = body.role === 'teacher' ? 'teacher' : 'student';
+      const id = clean(body.id, 100);
+      const isSelf = role === 'teacher'
+        ? callerProfile.teacher_id === id
+        : callerProfile.student_id === id;
+      const column = role === 'teacher' ? 'teacher_id' : 'student_id';
+      const { data: profile } = await admin.from('profiles').select('org_id').eq(column, id).maybeSingle();
+      if (!profile) return json({ error: 'account not provisioned' }, 404);
+      if (!isSelf && (!callerIsTeacher || (!caller.is_owner && profile.org_id !== caller.org_id))) {
+        return json({ error: 'forbidden' }, 403);
+      }
+      const { data: credential, error } = await admin.from('credentials')
+        .select('password')
+        .eq('owner_type', role)
+        .eq('owner_id', id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!credential?.password) return json({ error: 'password not found' }, 404);
+      return json({ ok: true, password: credential.password });
+    }
+
     if (body.action === 'password') {
       const role = body.role === 'teacher' ? 'teacher' : 'student';
       const id = clean(body.id, 100);

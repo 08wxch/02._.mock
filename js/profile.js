@@ -1,5 +1,5 @@
 import { icon } from './icons.js';
-import { cloudSetPassword } from './cloud.js';
+import { cloudSetPassword, cloudGetPassword } from './cloud.js';
 import { e } from './utils.js';
 import { avatar, toast, openModal, closeModal, mountCopyButtons } from './ui.js';
 import {
@@ -71,12 +71,36 @@ export function openAccountProfile({ kind = 'teacher', personId, session, title 
       const secret = overlay.querySelector('[data-secret-value]');
       const reveal = overlay.querySelector('[data-reveal-secret]');
       let visible = false;
-      reveal?.addEventListener('click', () => {
-        visible = !visible;
-        if (secret) secret.textContent = visible ? person.password : maskPassword(person.password);
-        reveal.innerHTML = visible ? icon('eye-off', 15) : icon('eye', 15);
-        reveal.setAttribute('aria-label', visible ? 'ซ่อนรหัสผ่าน' : 'เปิดดูรหัสผ่าน');
-        reveal.setAttribute('title', visible ? 'ซ่อนรหัสผ่าน' : 'เปิดดูรหัสผ่าน');
+      let revealing = false;
+      reveal?.addEventListener('click', async () => {
+        if (revealing) return;
+        if (visible) {
+          visible = false;
+          if (secret) secret.textContent = maskPassword(person.password);
+          reveal.innerHTML = icon('eye', 15);
+          reveal.setAttribute('aria-label', 'เปิดดูรหัสผ่าน');
+          reveal.setAttribute('title', 'เปิดดูรหัสผ่าน');
+          return;
+        }
+        let value = String(person.password || '');
+        if (!value) {
+          revealing = true;
+          reveal.disabled = true;
+          const result = await cloudGetPassword(isTeacher ? 'teacher' : 'student', person.id);
+          revealing = false;
+          reveal.disabled = false;
+          if (!result.ok) {
+            toast(result.error || 'ไม่พบรหัสผ่านของบัญชีนี้', 'error', 6000);
+            return;
+          }
+          value = result.password;
+          person.password = value;
+        }
+        visible = true;
+        if (secret) secret.textContent = value;
+        reveal.innerHTML = icon('eye-off', 15);
+        reveal.setAttribute('aria-label', 'ซ่อนรหัสผ่าน');
+        reveal.setAttribute('title', 'ซ่อนรหัสผ่าน');
       });
       const form = overlay.querySelector('[data-password-form]');
       overlay.querySelector('[data-open-password]')?.addEventListener('click', () => {

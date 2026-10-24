@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { cloudSetPassword } from '../cloud.js';
+import { cloudSetPassword, cloudGetPassword } from '../cloud.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, shortThaiDate, longThaiDate,
   relativeTime, formatNumber, formatStopwatch, percent, clamp,
@@ -1996,11 +1996,34 @@ function openStaffDetailModal(teacherId, session) {
       const secret = overlay.querySelector('[data-staff-secret]');
       const reveal = overlay.querySelector('[data-staff-reveal]');
       let visible = false;
-      reveal?.addEventListener('click', () => {
-        visible = !visible;
-        if (secret) secret.textContent = visible ? teacher.password : maskStaffPassword(teacher.password);
-        reveal.innerHTML = visible ? icon('eye-off', 15) : icon('eye', 15);
-        reveal.setAttribute('aria-label', visible ? 'ซ่อนรหัสผ่าน' : 'เปิดดูรหัสผ่าน');
+      let revealing = false;
+      reveal?.addEventListener('click', async () => {
+        if (revealing) return;
+        if (visible) {
+          visible = false;
+          if (secret) secret.textContent = maskStaffPassword(teacher.password);
+          reveal.innerHTML = icon('eye', 15);
+          reveal.setAttribute('aria-label', 'เปิดดูรหัสผ่าน');
+          return;
+        }
+        let value = String(teacher.password || '');
+        if (!value) {
+          revealing = true;
+          reveal.disabled = true;
+          const result = await cloudGetPassword('teacher', teacher.id);
+          revealing = false;
+          reveal.disabled = false;
+          if (!result.ok) {
+            toast(result.error || 'ไม่พบรหัสผ่านของบัญชีนี้', 'error', 6000);
+            return;
+          }
+          value = result.password;
+          teacher.password = value;
+        }
+        visible = true;
+        if (secret) secret.textContent = value;
+        reveal.innerHTML = icon('eye-off', 15);
+        reveal.setAttribute('aria-label', 'ซ่อนรหัสผ่าน');
       });
       overlay.querySelector('[data-edit-teacher-code]')?.addEventListener('click', () => {
         closeModal();
