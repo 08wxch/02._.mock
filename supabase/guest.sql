@@ -1,5 +1,5 @@
 -- Guest exam-code access: an anonymous Supabase user is linked to one student
--- for a single exam session. No password is required for the code flow.
+-- for a single exam session after the student's account password is verified.
 create table if not exists public.guest_sessions (
   user_id uuid primary key references auth.users(id) on delete cascade,
   student_id text not null,
