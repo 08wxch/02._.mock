@@ -1484,9 +1484,9 @@ export function teacherReviewView(ctx) {
       const score = attemptScore(exam, a);
       const isPending = needsReview({ attempt: a, exam });
       const status = isPending ? { label: 'รอตรวจ', tone: 'warning' } : { label: 'ตรวจแล้ว', tone: 'success' };
-      return `<tr data-review-row data-review-status="${isPending ? 'pending' : 'reviewed'}" data-exam-id="${e(exam.id)}" data-org-ids="${e(orgIds.join(' '))}" data-name="${e(a.studentName.toLowerCase())}" data-exam="${e(exam.title.toLowerCase())}">
+      return `<tr data-review-row data-review-status="${isPending ? 'pending' : 'reviewed'}" data-exam-id="${e(exam.id)}" data-org-ids="${e(orgIds.join(' '))}" data-name="${e(a.studentName.toLowerCase())}" data-exam="${e(exam.title.toLowerCase())}" data-teacher="${e(creatorName.toLowerCase())}">
       <td><div class="table-person">${avatar(a.studentName, a.studentId, 'sm')}<span class="table-person__copy"><strong>${e(a.studentName)}</strong><span>${e(a.studentCode)}</span></span></div></td>
-      <td><span class="exam-pill"><span class="subject-dot"></span>${e(exam.shortTitle || exam.title)}</span></td>
+      <td><span class="exam-pill"><span class="subject-dot"></span><span class="exam-pill__copy">${e(exam.shortTitle || exam.title)}<small>โดย ${e(creatorName)}</small></span></span></td>
       <td><span style="font-size:9.5px;color:var(--muted)">${thaiTime(a.submittedAt)} น. · ${relativeTime(a.submittedAt)}</span></td>
       <td>${badge(status.label, status.tone)}</td>
       <td><strong class="table-number">${formatNumber(score.total, 1)}</strong><span style="font-size:8.5px;color:var(--muted)"> / ${score.max}</span></td>
@@ -1546,7 +1546,7 @@ export function teacherReviewView(ctx) {
     </div>
     <div class="scroll-x">
       <table class="data-table review-queue-table">
-        <thead><tr><th>นักเรียน</th><th>ชุดสอบ</th><th>เวลาส่ง</th><th>สถานะ</th><th>คะแนน</th><th style="text-align:right">การกระทำ</th></tr></thead>
+        <thead><tr><th>นักเรียน</th><th>ชุดสอบ / ครูผู้สร้าง</th><th>เวลาส่ง</th><th>สถานะ</th><th>คะแนน</th><th style="text-align:right">การกระทำ</th></tr></thead>
         <tbody data-review-rows>${rows}</tbody>
       </table>
       <div data-review-empty style="display:none" class="table-empty">ไม่พบรายการที่ตรงกับตัวกรอง</div>
@@ -1603,7 +1603,7 @@ export function teacherReviewView(ctx) {
           const match = (currentFilter === 'all' || row.dataset.reviewStatus === currentFilter)
             && (currentExam === 'all' || row.dataset.examId === currentExam)
             && (currentOrg === 'all' || orgIds.includes(currentOrg))
-            && (!q || row.dataset.name.includes(q) || row.dataset.exam.includes(q));
+            && (!q || row.dataset.name.includes(q) || row.dataset.exam.includes(q) || row.dataset.teacher.includes(q));
           row.classList.toggle('hidden', !match);
           if (match) {
             visible++;

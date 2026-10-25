@@ -1653,7 +1653,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .review-queue-head { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 16px; flex-wrap: wrap; }
 .review-queue-table .table-person { min-width: 190px; }
 .exam-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; color: var(--ink-soft); }
-.exam-pill .subject-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--coral); }
+.exam-pill .subject-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--coral); flex: 0 0 auto; }
+.exam-pill__copy { display: grid; gap: 1px; min-width: 0; }
+.exam-pill__copy small { font-size: 8px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
 .queue-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; border-radius: 99px; background: rgba(52, 52, 52, .13); color: var(--pine); font-size: 8.5px; margin-left: 4px; }
 .chip.is-active .queue-filter-count { background: rgba(255, 255, 255, .18); color: #ffffff; }
 
