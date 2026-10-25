@@ -489,7 +489,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
     <div class="exam-admin-head__actions">
       ${canEdit ? `<a class="icon-btn" href="#/teacher/exam/${exam.id}/edit" title="แก้ไขชุดสอบ" aria-label="แก้ไขชุดสอบ">${icon('edit', 15)}</a>` : ''}
       ${canManage ? `<button class="icon-btn icon-btn--danger" type="button" data-delete-exam="${exam.id}" title="ลบชุดสอบ" aria-label="ลบชุดสอบ">${icon('trash', 15)}</button>` : ''}
-      ${!canEdit ? `<span class="exam-readonly-note">${icon('eye', 13)} ดูข้อมูลจากเจ้าของชุดสอบ</span>` : !canManage ? `<span class="exam-readonly-note">${icon('edit', 13)} แก้ไขร่วม · เปลี่ยนสถานะไม่ได้</span>` : exam.status === 'draft'
+      ${!canEdit ? `<span class="exam-readonly-note">${icon(canReview ? 'clipboard-check' : 'eye', 13)} ${canReview ? 'อ่านข้อมูล · ตรวจคำตอบได้' : 'ดูข้อมูลจากเจ้าของชุดสอบ'}</span>` : !canManage ? `<span class="exam-readonly-note">${icon('edit', 13)} แก้ไขร่วม · เปลี่ยนสถานะไม่ได้</span>` : exam.status === 'draft'
         ? `<button class="btn btn--ghost" type="button" data-publish-exam>${icon('users', 15)} เผยแพร่ให้ครูเห็น</button>
            <button class="btn btn--primary" type="button" data-open-exam>${icon('play', 15)} เปิดสอบ</button>`
         : exam.status === 'saved'
