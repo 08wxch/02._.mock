@@ -1104,6 +1104,8 @@ export function resultView(ctx) {
   const showSolutions = exam.settings?.showSolutions !== false;
   const showRank = Boolean(exam.settings?.showRank);
   const essayPoints = exam.questions.filter(q => q.type === 'essay').reduce((sum, q) => sum + q.points, 0);
+  const shortPoints = exam.questions.filter(q => q.type === 'short').reduce((sum, q) => sum + q.points, 0);
+  const writtenPoints = essayPoints + shortPoints;
   const objectivePoints = score.max - essayPoints;
   const used = attempt.timeUsedSec || Math.max(1, Math.round((new Date(attempt.submittedAt) - new Date(attempt.startedAt)) / 1000));
   const ranking = rankAttempts(exam);
@@ -1185,7 +1187,7 @@ export function resultView(ctx) {
         ${!showScore
           ? `<div class="result-status result-status--pending">${icon('award', 15)} ประกาศผลแล้ว · ครูเลือกไม่แสดงคะแนน</div>`
           : pending
-            ? `<div class="result-status result-status--pending">${icon('clock', 15)} ประกาศผลแล้ว · รอตรวจข้ออัตนัย</div>`
+            ? `<div class="result-status result-status--pending">${icon('clock', 15)} ประกาศผลแล้ว · รอตรวจข้อเขียน/เติมคำ</div>`
             : `<div class="result-status ${passed ? 'result-status--pass' : 'result-status--fail'}">${icon(passed ? 'check-circle' : 'alert-circle', 15)} ${passed ? `ผ่านเกณฑ์ (เกณฑ์ผ่าน ${exam.passPercent}%)` : `ต่ำกว่าเกณฑ์ (เกณฑ์ผ่าน ${exam.passPercent}%)`}</div>`}
       </div>
       <div class="result-score">
@@ -1194,7 +1196,7 @@ export function resultView(ctx) {
       </div>
     </section>
     <div class="result-toolbar no-print">
-      <div class="result-toolbar__left">${icon('shield-check', 14)} ผลสอบได้รับการยืนยันจากครูแล้ว ${pending ? '· คะแนนอัตนัยอาจเปลี่ยนแปลง' : ''}</div>
+      <div class="result-toolbar__left">${icon('shield-check', 14)} ผลสอบได้รับการยืนยันจากครูแล้ว ${pending ? '· คะแนนข้อเขียน/เติมคำอาจเปลี่ยนแปลง' : ''}</div>
       <div class="result-toolbar__actions">
         <a class="btn btn--ghost btn--sm" href="#/student/history">${icon('list-checks', 14)} ประวัติการสอบ</a>
         <button class="btn btn--primary btn--sm" type="button" data-print>${icon('download', 14)} ดาวน์โหลด PDF</button>
@@ -1214,8 +1216,8 @@ export function resultView(ctx) {
         <div class="card result-rank-card">
           <h3>สรุปคะแนน</h3>
           ${showScore ? `
-          <div class="result-summary-line"><span>ปรนัย + เติมคำ</span><strong>${formatNumber(score.auto, 1)} / ${objectivePoints}</strong></div>
-          ${essayPoints ? `<div class="result-summary-line"><span>ข้ออัตนัย</span><strong>${formatNumber(score.manual, 1)} / ${essayPoints}</strong></div>` : ''}
+          <div class="result-summary-line"><span>ปรนัย + เติมคำที่ตรงคำตอบ</span><strong>${formatNumber(score.auto, 1)} / ${objectivePoints}</strong></div>
+          ${writtenPoints ? `<div class="result-summary-line"><span>ข้อเขียน + เติมคำ (ตรวจมือ)</span><strong>${formatNumber(score.manual, 1)} / ${writtenPoints}</strong></div>` : ''}
           <div class="result-summary-line"><span>รวมทั้งหมด</span><strong>${formatNumber(score.total, 1)} / ${score.max}</strong></div>
           <div class="result-summary-line"><span>เกณฑ์ผ่าน</span><strong>${exam.passPercent}%</strong></div>
           ${score.overridden ? `<div class="result-summary-line"><span>หมายเหตุ</span><strong>ครูปรับคะแนนแล้ว</strong></div>` : ''}`
@@ -1233,7 +1235,7 @@ export function resultView(ctx) {
           <div class="result-summary-line"><span>ส่งเมื่อ</span><strong>${thaiTime(attempt.submittedAt)} น.</strong></div>
           <div class="result-summary-line"><span>ประกาศผล</span><strong>${thaiDate(exam.publishedAt || new Date())}</strong></div>
           <div class="result-summary-line"><span>ผู้สอน</span><strong>${e(exam.teacherName.split(' ')[0])}</strong></div>
-          <div class="result-share-note">${icon('info', 12)} ${pending ? 'ข้ออัตนัยอยู่ระหว่างการตรวจ คะแนนอาจเปลี่ยนแปลง' : 'หากมีข้อสงสัยเกี่ยวกับผลสอบ กรุณาติดต่อครูผู้สอน'}</div>
+          <div class="result-share-note">${icon('info', 12)} ${pending ? 'ข้อเขียน/เติมคำอยู่ระหว่างการตรวจ คะแนนอาจเปลี่ยนแปลง' : 'หากมีข้อสงสัยเกี่ยวกับผลสอบ กรุณาติดต่อครูผู้สอน'}</div>
         </div>
       </aside>
     </div>

@@ -791,7 +791,7 @@ function statsTab(exam, metrics) {
   const qstats = questionStats(exam);
   const ranking = rankAttempts(exam);
   const maxBin = Math.max(...distribution.map(d => d.count), 1);
-  const subjectiveTotal = exam.questions.filter(q => q.type === 'essay').reduce((s, q) => s + q.points, 0);
+  const subjectiveTotal = exam.questions.filter(q => q.type === 'essay' || q.type === 'short').reduce((s, q) => s + q.points, 0);
   return `<div class="print-area">
     ${makePrintHeader(`รายงานผลสอบ ${exam.title}`, `ครู ${exam.teacherName} · ข้อมูล ณ ${thaiDateTime(new Date())}`)}
     <div class="stats-grid-top">
@@ -830,7 +830,7 @@ function statsTab(exam, metrics) {
         <div class="result-summary-line"><span>คะแนนสูงสุด</span><strong>${formatNumber(metrics.highest, 1)} / ${exam.totalPoints}</strong></div>
         <div class="result-summary-line"><span>ผ่านเกณฑ์</span><strong>${metrics.passed} / ${metrics.submitted} คน</strong></div>
         <div class="result-summary-line"><span>อัตราผ่าน</span><strong>${metrics.passRate}%</strong></div>
-        <div class="result-summary-line"><span>คะแนนอัตนัยเต็ม</span><strong>${subjectiveTotal} คะแนน</strong></div>
+        <div class="result-summary-line"><span>คะแนนข้อเขียน/เติมคำเต็ม</span><strong>${subjectiveTotal} คะแนน</strong></div>
         <div class="result-summary-line"><span>ตรวจแล้ว</span><strong>${metrics.graded} / ${metrics.submitted} คน</strong></div>
         <div class="notice-strip notice-strip--info" style="margin-top:14px">${icon('info', 14)}<span>สถิติคำนวณจากคำตอบที่ส่งแล้ว ${metrics.submitted} คน และอัปเดตทันทีเมื่อมีการตรวจหรือแก้คะแนน</span></div>
       </div>
