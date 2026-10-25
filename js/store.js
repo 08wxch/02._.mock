@@ -1045,6 +1045,10 @@ export function hasAllOrganizationAccess(session, db = getDB()) {
 
 export function canManageOrganizations(session, db = getDB()) {
   if (isOwnerTeacher(session)) return true;
+  // Organization-level management belongs to the manager role only. A teacher
+  // account in a manage_all organization may view the data but must not manage
+  // organizations, staff, or other organizations.
+  if (!isManagerStaff(session)) return false;
   return organizationAccessLevel(currentOrganization(session, db)) === 'manage_all';
 }
 
@@ -1126,7 +1130,65 @@ export function canReviewExam(exam, session) {
   if (!exam || !session || session.role !== 'teacher') return false;
   if (!canViewExam(exam, session)) return false;
   if (isOwnerTeacher(session) || exam.teacherId === session.teacherId) return true;
+  if (isManagerStaff(session)) {
+    const me = currentTeacher(session);
+    if (me && examOrganizationIds(exam).includes(me.orgId)) return true;
+    // A manager of a manage_all organization may also review exams in the
+    // organizations visible to that organization.
+    if (canManageOrganizations(session)) return true;
+  }
   return Array.isArray(exam.reviewerIds) && exam.reviewerIds.includes(session.teacherId);
+}
+
+// Managers (and the owner/creator) can ask the people responsible for an exam
+// to clear the review queue. Assigned reviewers can review but cannot send
+// reminders on behalf of the exam owner.
+export function canSendReviewReminder(exam, session) {
+  if (!exam || !session || session.role !== 'teacher') return false;
+  if (!canReviewExam(exam, session)) return false;
+  return isOwnerTeacher(session)
+    || exam.teacherId === session.teacherId
+    || isManagerStaff(session);
+}
+
+export function sendReviewReminder(examId, teacherIds = [], actor = null) {
+  const db = getDB();
+  const exam = db.exams.find(e => e.id === examId && !e.deletedAt);
+  if (!exam) return { ok: false, error: 'ไม่พบชุดสอบ' };
+  if (!canSendReviewReminder(exam, actor)) {
+    return { ok: false, error: 'เฉพาะเจ้าของชุดสอบ ผู้จัดการหน่วยงาน หรือ Wich เท่านั้นที่ส่งแจ้งเตือนได้' };
+  }
+  const reviewerIds = new Set(Array.isArray(exam.reviewerIds) ? exam.reviewerIds : []);
+  const allowed = new Set(visibleStaff(actor, db, 'all')
+    .filter(t => t.id !== actor.teacherId)
+    .filter(t => reviewerIds.has(t.id) || canReviewExam(exam, {
+      role: 'teacher', teacherId: t.id, orgId: t.orgId, staffRole: t.staffRole
+    }))
+    .map(t => t.id));
+  const ids = [...new Set((Array.isArray(teacherIds) ? teacherIds : []).map(String).filter(Boolean))]
+    .filter(id => allowed.has(id));
+  if (!ids.length) return { ok: false, error: 'ยังไม่มีครูที่สามารถรับแจ้งเตือนได้' };
+  if (!Array.isArray(db.notices)) db.notices = [];
+  const pending = (db.attempts || []).filter(a => a.examId === exam.id
+    && a.status !== 'in_progress'
+    && (!a.reviewed || pendingEssayQuestions(exam, a).length > 0)).length;
+  const createdAt = new Date().toISOString();
+  const sender = currentTeacher(actor);
+  const senderName = sender?.name || actor?.name || '';
+  ids.forEach(id => {
+    db.notices.unshift({
+      id: uid('notice'),
+      createdAt,
+      read: false,
+      target: `teacher:${id}`,
+      title: 'แจ้งเตือนตรวจคำตอบ',
+      body: `${exam.shortTitle || exam.title} · ${pending} รายการรอตรวจ${senderName ? ` · จาก ${senderName}` : ''}`,
+      kind: 'review',
+      href: `#/teacher/review?exam=${exam.id}&status=pending`
+    });
+  });
+  if (db.notices.length > 1000) db.notices = db.notices.slice(0, 1000);
+  return { ok: true, count: ids.length, pending: saveDB() };
 }
 
 export function setExamReviewers(examId, reviewerIds = [], actor = null) {
@@ -2029,6 +2091,12 @@ export function getNotifications(session) {
   const all = [];
   if (!session) return all;
   if (session.role === 'teacher') {
+    const teacherKey = `teacher:${session.teacherId}`;
+    const readIds = new Set(db.noticeReads?.[teacherKey] || []);
+    (db.notices || [])
+      .filter(n => n.target === teacherKey && !readIds.has(n.id))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .forEach(n => all.push({ ...n, href: n.href || '#/teacher/review' }));
     const recent = db.attempts
       .filter(a => {
         if (a.status === 'in_progress' || a.reviewed) return false;
@@ -2075,9 +2143,12 @@ export function getNotifications(session) {
 }
 
 export function markNoticeRead(session, noticeId) {
-  if (!session || session.role !== 'student' || !noticeId) return;
+  if (!session || !noticeId) return;
   const db = getDB();
-  const key = currentStudentKey(session);
+  const key = session.role === 'teacher'
+    ? (session.teacherId ? `teacher:${session.teacherId}` : '')
+    : currentStudentKey(session);
+  if (!key) return;
   if (!db.noticeReads || typeof db.noticeReads !== 'object') db.noticeReads = {};
   const reads = Array.isArray(db.noticeReads[key]) ? db.noticeReads[key] : [];
   if (reads.includes(noticeId)) return;

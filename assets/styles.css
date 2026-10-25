@@ -3186,6 +3186,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .review-group__copy strong { font-size: 10px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .review-group__copy small { font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .review-group__code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; color: var(--muted-2); background: #ffffff; border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; flex: 0 0 auto; }
+.review-group__remind { flex: 0 0 auto; min-height: 26px; padding: 0 8px; font-size: 8.5px; white-space: nowrap; }
 .review-toolbar .table-caption { white-space: nowrap; }
 @media (max-width: 760px) {
   .review-filter-bar { padding: 10px 11px; gap: 7px; }

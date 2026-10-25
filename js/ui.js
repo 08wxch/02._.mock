@@ -177,8 +177,8 @@ export function notificationBell({ session, items = [], mode = 'student' } = {})
         ${count ? `<span class="live-dot live-dot--small"><span></span>สด</span>` : ''}
       </div>
       <div class="popover__list">
-        ${items.length ? items.map(item => `<a class="notice-item" href="${item.href || (mode === 'teacher' ? '#/teacher/review' : '#/student')}">
-          <span class="notice-item__icon notice-item__icon--${item.kind || 'info'}">${icon(item.kind === 'result' ? 'award' : item.kind === 'submission' ? 'file-text' : item.kind === 'warning' ? 'alert-triangle' : 'info', 17)}</span>
+        ${items.length ? items.map(item => `<a class="notice-item" href="${item.href || (mode === 'teacher' ? '#/teacher/review' : '#/student')}" ${item.id ? `data-notice-id="${e(item.id)}"` : ''}>
+          <span class="notice-item__icon notice-item__icon--${item.kind || 'info'}">${icon(item.kind === 'result' ? 'award' : item.kind === 'submission' ? 'file-text' : item.kind === 'review' ? 'clipboard-check' : item.kind === 'warning' ? 'alert-triangle' : 'info', 17)}</span>
           <span class="notice-item__copy"><strong>${e(item.title)}</strong><span>${e(item.body)}</span><small>${relativeTime(item.createdAt)}</small></span>
         </a>`).join('') : `<div class="popover__empty">${icon('bell', 26)}<span>ไม่มีการแจ้งเตือนใหม่</span></div>`}
       </div>

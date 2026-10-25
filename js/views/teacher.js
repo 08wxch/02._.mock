@@ -13,13 +13,13 @@ import {
 import {
   getDB, findExam, participantRows, examMetrics, totalPendingReview,
   attemptScore, attemptStatusMeta, questionStats, scoreDistribution,
-  rankAttempts, getNotifications, saveDB, addNotice, getExamAttempts,
+  rankAttempts, getNotifications, markNoticeRead, saveDB, addNotice, getExamAttempts,
   pendingEssayQuestions, pendingReviewQuestions, answerText, correctAnswerText, getAnswerValue,
   isCorrect, clearSession, currentStudentKey, submitAttempt,
   addStudent, removeStudent, deleteExam, addClass, addClassAcrossOrganizations, renameClass, deleteClass,
   setStudentClasses, classIdsOf, classCodesOf, studentsInClass,
   currentTeacher, isOwnerTeacher, visibleExams, canViewExam, canManageExam,
-  canReviewExam, setExamReviewers,
+  canReviewExam, setExamReviewers, canSendReviewReminder, sendReviewReminder,
   canEditExam, canViewExamStats, isManagerStaff, visibleStaff, visibleStudents,
   visibleClasses, canAccessStudent, findOrganization,
   organizationName, addOrganization, updateOrganization, deleteOrganization, creatorOfExam,
@@ -108,6 +108,9 @@ export function teacherShell(session, { active = 'dashboard', crumb = 'ภาพ
 
 export function mountTeacherShell(session) {
   mountNotificationBell(document);
+  document.querySelectorAll('[data-notice-id]').forEach(link => {
+    link.addEventListener('click', () => markNoticeRead(session, link.dataset.noticeId));
+  });
   mountCopyButtons(document);
   mountPrintButtons(document);
   document.querySelector('[data-open-teacher-profile]')?.addEventListener('click', () => {
@@ -460,7 +463,7 @@ export function teacherExamsView(ctx) {
   };
 }
 
-function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false, canReview = false } = {}) {
+function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false, canReview = false, canRemind = false } = {}) {
   const meta = statusMeta(exam.status);
   const creator = creatorOfExam(exam);
   const shareLabel = exam.shareMode === 'edit' ? 'ครูอื่นแก้ไขได้' : 'ครูอื่นดูอย่างเดียว';
@@ -488,6 +491,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
       </div>
     </div>
     <div class="exam-admin-head__actions">
+      ${canRemind && metrics.pendingReview ? `<button class="btn btn--ghost" type="button" data-remind-exam>${icon('bell', 15)} แจ้งเตือนครู</button>` : ''}
       ${canEdit ? `<a class="icon-btn" href="#/teacher/exam/${exam.id}/edit" title="แก้ไขชุดสอบ" aria-label="แก้ไขชุดสอบ">${icon('edit', 15)}</a>` : ''}
       ${canManage ? `<button class="icon-btn icon-btn--danger" type="button" data-delete-exam="${exam.id}" title="ลบชุดสอบ" aria-label="ลบชุดสอบ">${icon('trash', 15)}</button>` : ''}
       ${!canEdit ? `<span class="exam-readonly-note">${icon(canReview ? 'clipboard-check' : 'eye', 13)} ${canReview ? 'อ่านข้อมูล · ตรวจคำตอบได้' : 'ดูข้อมูลจากเจ้าของชุดสอบ'}</span>` : !canManage ? `<span class="exam-readonly-note">${icon('edit', 13)} แก้ไขร่วม · เปลี่ยนสถานะไม่ได้</span>` : exam.status === 'draft'
@@ -973,6 +977,71 @@ function openReviewerModal(exam, session) {
   });
 }
 
+function openReviewReminderModal(exam, stats, session) {
+  const db = getDB();
+  const reviewerIds = new Set(Array.isArray(exam.reviewerIds) ? exam.reviewerIds : []);
+  const candidates = visibleStaff(session, db)
+    .filter(t => t.id !== session.teacherId && !t.isOwner)
+    .filter(t => reviewerIds.has(t.id) || canReviewExam(exam, {
+      role: 'teacher', teacherId: t.id, orgId: t.orgId, staffRole: t.staffRole
+    }))
+    .sort((a, b) => {
+      const rank = t => t.id === exam.teacherId ? 0 : t.staffRole === 'manager' ? 1 : 2;
+      return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name), 'th');
+    });
+  const pending = Number(stats?.pending || 0);
+  openModal({
+    title: 'แจ้งเตือนครูให้ตรวจคำตอบ',
+    eyebrow: 'ติดตามคิวตรวจ',
+    size: 'md',
+    body: `<div class="notice-strip notice-strip--info" style="margin-bottom:12px">${icon('bell', 14)}<span>เลือกครูที่จะได้รับการแจ้งเตือนในกระดิ่ง ระบบจะแจ้งว่าชุดสอบนี้ยังมีคำตอบรอตรวจ ${pending} รายการ โดยไม่เปลี่ยนสิทธิ์การตรวจของใคร</span></div>
+      ${candidates.length ? `<div class="reviewer-picker">${candidates.map(t => {
+        const tags = [
+          t.id === exam.teacherId ? 'เจ้าของชุดสอบ' : '',
+          t.staffRole === 'manager' ? 'ผู้จัดการหน่วยงาน' : 'ครูผู้สอน',
+          reviewerIds.has(t.id) ? 'ผู้รับผิดชอบตรวจ' : ''
+        ].filter(Boolean).join(' · ');
+        return `<label class="reviewer-option">
+          <input type="checkbox" data-remind-target value="${e(t.id)}" checked>
+          <span><strong>${e(t.name)}</strong><small>${e(tags)} · ${e(findOrganization(t.orgId, db)?.name || t.school || '—')}</small></span>
+        </label>`;
+      }).join('')}</div>` : `<div class="notice-strip">${icon('users', 14)}<span>ยังไม่มีครูคนอื่นที่สามารถตรวจชุดสอบนี้ได้</span></div>`}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px">
+        <p style="font-size:9px;color:var(--muted);margin:0">ผู้จัดการหน่วยงานเห็นและตรวจชุดสอบในหน่วยงานของตนได้ · ครูทั่วไปต้องได้รับเลือกเป็นผู้ตรวจก่อน</p>
+        ${candidates.length ? `<button class="btn btn--link" style="font-size:9px;white-space:nowrap" type="button" data-remind-toggle>เลือกทั้งหมด</button>` : ''}
+      </div>
+      <div class="form-error" data-remind-error style="margin-top:9px">${icon('alert-circle', 14)}<span></span></div>`,
+    footer: `<button class="btn btn--ghost" type="button" data-modal-close>ยกเลิก</button>
+      <button class="btn btn--primary" type="button" data-send-review-reminder ${candidates.length ? '' : 'disabled'}>${icon('bell', 14)} ส่งแจ้งเตือน</button>`,
+    onMount(overlay) {
+      const error = overlay.querySelector('[data-remind-error]');
+      const showError = message => {
+        error.querySelector('span').textContent = message;
+        error.classList.add('is-visible');
+      };
+      overlay.querySelector('[data-remind-toggle]')?.addEventListener('click', () => {
+        overlay.querySelectorAll('[data-remind-target]').forEach(input => { input.checked = true; });
+      });
+      overlay.querySelector('[data-send-review-reminder]')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        if (btn.disabled) return;
+        const ids = [...overlay.querySelectorAll('[data-remind-target]:checked')].map(input => input.value);
+        if (!ids.length) { showError('กรุณาเลือกครูอย่างน้อย 1 คน'); return; }
+        btn.disabled = true;
+        const result = sendReviewReminder(exam.id, ids, session);
+        if (!result.ok) {
+          showError(result.error || 'ส่งแจ้งเตือนไม่สำเร็จ');
+          btn.disabled = false;
+          return;
+        }
+        await result.pending;
+        closeModal();
+        toast(`ส่งแจ้งเตือนถึง ${result.count} คนแล้ว`, 'success');
+      });
+    }
+  });
+}
+
 function bindExamActions(exam, session) {
   bindDeleteExamButtons(session);
   document.querySelectorAll('[data-edit-reviewers]').forEach(btn => btn.addEventListener('click', () => openReviewerModal(exam, session)));
@@ -1161,6 +1230,7 @@ export function teacherExamView(ctx) {
   const canReview = canReviewExam(exam, session);
   const canEdit = canEditExam(exam, session);
   const canViewStats = canViewExamStats(exam, session);
+  const canRemind = canSendReviewReminder(exam, session);
   const requested = ['overview', 'students', 'grading', 'stats'].includes(ctx.tab) ? ctx.tab : 'overview';
   const allowed = requested === 'overview'
     || (requested === 'students' && canManage)
@@ -1173,12 +1243,18 @@ export function teacherExamView(ctx) {
   else if (tab === 'grading') tabContent = gradingTab(exam, metrics);
   else if (tab === 'stats') tabContent = statsTab(exam, metrics);
   else tabContent = overviewTab(exam, metrics, canManage, canViewStats, canReview);
-  const content = `${examHeader(exam, metrics, { tab, canManage, canEdit, canViewStats, canReview })}
+  const content = `${examHeader(exam, metrics, { tab, canManage, canEdit, canViewStats, canReview, canRemind })}
     <div data-tab-content>${tabContent}</div>`;
   return {
     html: teacherShell(session, { active: 'exams', crumb: exam.shortTitle || exam.title, content }),
     mount() {
       mountTeacherShell(session);
+      document.querySelector('[data-remind-exam]')?.addEventListener('click', () => {
+        openReviewReminderModal(exam, {
+          total: metrics.submitted,
+          pending: metrics.pendingReview
+        }, session);
+      });
       if (canManage) {
         bindExamActions(exam, session);
         if (tab === 'students') bindStudentsTab(exam, metrics);
@@ -1471,12 +1547,14 @@ export function teacherReviewView(ctx) {
     const reviewerNote = reviewers.length
       ? ` · ผู้ตรวจ ${reviewers.map(t => t.name).join(', ')}`
       : '';
+    const canRemind = canSendReviewReminder(exam, session) && stats.pending > 0;
     const group = `<tr class="review-group-row" data-review-group data-group-exam="${e(exam.id)}" data-group-orgs="${e(orgIds.join(' '))}">
       <td colspan="6">
         <div class="review-group__inner">
           <span class="review-group__icon">${icon('file-text', 13)}</span>
           <span class="review-group__copy"><strong>${e(exam.shortTitle || exam.title)}</strong><small>สร้างโดย ${e(creatorName)}${e(reviewerNote)} · ${e(orgNames)} · ${stats.total} คำตอบ · ${stats.pending} รอตรวจ</small></span>
           <span class="review-group__code">${e(exam.code)}</span>
+          ${canRemind ? `<button class="btn btn--ghost btn--sm review-group__remind" type="button" data-remind-review="${e(exam.id)}" title="แจ้งเตือนครูที่เกี่ยวข้อง">${icon('bell', 12)} แจ้งเตือนครู</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -1557,6 +1635,15 @@ export function teacherReviewView(ctx) {
     html: teacherShell(session, { active: 'review', crumb: 'ตรวจคำตอบ', content }),
     mount() {
       mountTeacherShell(session);
+      document.querySelectorAll('[data-remind-review]').forEach(btn => btn.addEventListener('click', () => {
+        const targetExam = db.exams.find(e => e.id === btn.dataset.remindReview);
+        if (!targetExam) return;
+        const items = all.filter(x => x.exam.id === targetExam.id);
+        openReviewReminderModal(targetExam, {
+          total: items.length,
+          pending: items.filter(needsReview).length
+        }, session);
+      }));
       let currentFilter = initialStatus;
       let currentExam = initialExam;
       let currentOrg = globalAccess ? initialOrg : (me?.orgId || 'all');
