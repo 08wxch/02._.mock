@@ -813,6 +813,10 @@ function migrateDB(db) {
       exam.assignedStudentIds = db.students.map(s => s.id);
       changed = true;
     }
+    if (!Array.isArray(exam.reviewerIds)) {
+      exam.reviewerIds = [];
+      changed = true;
+    }
     const examTeacher = teacherById(exam.teacherId);
     if (!examTeacher) {
       exam.teacherId = db.teacher.id;
@@ -1116,6 +1120,32 @@ export function canManageExam(exam, session) {
   if (!exam || !session || session.role !== 'teacher') return false;
   if (!canViewExam(exam, session)) return false;
   return isOwnerTeacher(session) || exam.teacherId === session.teacherId;
+}
+
+export function canReviewExam(exam, session) {
+  if (!exam || !session || session.role !== 'teacher') return false;
+  if (!canViewExam(exam, session)) return false;
+  if (isOwnerTeacher(session) || exam.teacherId === session.teacherId) return true;
+  return Array.isArray(exam.reviewerIds) && exam.reviewerIds.includes(session.teacherId);
+}
+
+export function setExamReviewers(examId, reviewerIds = [], actor = null) {
+  const db = getDB();
+  const exam = db.exams.find(e => e.id === examId);
+  if (!exam) return { ok: false, error: 'ไม่พบชุดสอบ' };
+  if (!canManageExam(exam, actor)) {
+    return { ok: false, error: 'เฉพาะเจ้าของชุดสอบและ Wich เท่านั้นที่เลือกผู้ตรวจได้' };
+  }
+  const allowed = new Set((db.teachers || [])
+    .filter(t => !t.deletedAt && t.id !== exam.teacherId)
+    .filter(t => canViewExam(exam, {
+      role: 'teacher', teacherId: t.id, orgId: t.orgId, staffRole: t.staffRole
+    }))
+    .map(t => t.id));
+  const clean = [...new Set((Array.isArray(reviewerIds) ? reviewerIds : []).map(String).filter(Boolean))]
+    .filter(id => allowed.has(id));
+  exam.reviewerIds = clean;
+  return { ok: true, exam, pending: saveDB() };
 }
 
 export function canEditExam(exam, session) {
@@ -1989,7 +2019,7 @@ export function totalPendingReview(session = null) {
   return db.attempts.filter(a => {
     const exam = db.exams.find(e => e.id === a.examId);
     if (!exam || a.status === 'in_progress') return false;
-    if (session && !canManageExam(exam, session)) return false;
+    if (session && !canReviewExam(exam, session)) return false;
     return !a.reviewed || pendingEssayQuestions(exam, a).length > 0;
   }).length;
 }
@@ -2003,7 +2033,7 @@ export function getNotifications(session) {
       .filter(a => {
         if (a.status === 'in_progress' || a.reviewed) return false;
         const exam = db.exams.find(e => e.id === a.examId);
-        return exam && canManageExam(exam, session);
+        return exam && canReviewExam(exam, session);
       })
       .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))
       .slice(0, 5);

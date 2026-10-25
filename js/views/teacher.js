@@ -19,6 +19,7 @@ import {
   addStudent, removeStudent, deleteExam, addClass, addClassAcrossOrganizations, renameClass, deleteClass,
   setStudentClasses, classIdsOf, classCodesOf, studentsInClass,
   currentTeacher, isOwnerTeacher, visibleExams, canViewExam, canManageExam,
+  canReviewExam, setExamReviewers,
   canEditExam, canViewExamStats, isManagerStaff, visibleStaff, visibleStudents,
   visibleClasses, canAccessStudent, findOrganization,
   organizationName, addOrganization, updateOrganization, deleteOrganization, creatorOfExam,
@@ -218,10 +219,11 @@ export function teacherDashboardView(ctx) {
   const teacher = currentTeacher(session) || db.teacher;
   const visible = visibleExams(session, db);
   const manageable = visible.filter(exam => canManageExam(exam, session));
-  const manageableIds = new Set(manageable.map(exam => exam.id));
+  const reviewable = visible.filter(exam => canReviewExam(exam, session));
+  const reviewableIds = new Set(reviewable.map(exam => exam.id));
   const active = manageable.find(e => e.status === 'open') || null;
   const allSubmitted = db.attempts
-    .filter(a => a.status !== 'in_progress' && manageableIds.has(a.examId))
+    .filter(a => a.status !== 'in_progress' && reviewableIds.has(a.examId))
     .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
   const pending = totalPendingReview(session);
   const metrics = active ? examMetrics(active) : null;
@@ -229,7 +231,7 @@ export function teacherDashboardView(ctx) {
   const today = new Date();
   const unreviewed = db.attempts
     .filter(a => {
-      if (a.status === 'in_progress' || !manageableIds.has(a.examId)) return false;
+      if (a.status === 'in_progress' || !reviewableIds.has(a.examId)) return false;
       const exam = db.exams.find(x => x.id === a.examId);
       return !a.reviewed || (exam && pendingEssayQuestions(exam, a).length > 0);
     })
@@ -457,7 +459,7 @@ export function teacherExamsView(ctx) {
   };
 }
 
-function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false } = {}) {
+function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false, canReview = false } = {}) {
   const meta = statusMeta(exam.status);
   const creator = creatorOfExam(exam);
   const shareLabel = exam.shareMode === 'edit' ? 'ครูอื่นแก้ไขได้' : 'ครูอื่นดูอย่างเดียว';
@@ -466,7 +468,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
     <div class="exam-admin-head__main">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px">
         ${badge(meta.label, meta.tone, Boolean(meta.dot))}
-        ${!canEdit ? badge('อ่านอย่างเดียว', 'neutral') : !canManage ? badge('แก้ไขร่วม', 'info') : ''}
+        ${!canEdit && canReview ? badge('ผู้ตรวจคำตอบ', 'info') : !canEdit ? badge('อ่านอย่างเดียว', 'neutral') : !canManage ? badge('แก้ไขร่วม', 'info') : ''}
         <span class="exam-code-card">${icon('hash', 11)} <strong>${e(exam.code)}</strong><button class="icon-btn" type="button" data-copy="${exam.code}" aria-label="คัดลอกรหัสสอบ" title="คัดลอกรหัสสอบ">${icon('copy', 12)}</button></span>
       </div>
       <h1>${e(exam.title)}</h1>
@@ -504,15 +506,18 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
   </div>
   <div class="exam-tabs">
     <a class="exam-tab ${tab === 'overview' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/overview">${icon('layout-dashboard', 13)} ภาพรวม</a>
-    ${canManage ? `<a class="exam-tab ${tab === 'students' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/students">${icon('users', 13)} ผู้เข้าสอบ <span class="exam-tab__count">${metrics.total}</span></a>
-    <a class="exam-tab ${tab === 'grading' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/grading">${icon('clipboard-check', 13)} ตรวจคำตอบ ${metrics.pendingReview ? `<span class="exam-tab__count exam-tab__count--alert">${metrics.pendingReview}</span>` : ''}</a>` : ''}
+    ${canManage ? `<a class="exam-tab ${tab === 'students' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/students">${icon('users', 13)} ผู้เข้าสอบ <span class="exam-tab__count">${metrics.total}</span></a>` : ''}
+    ${canReview ? `<a class="exam-tab ${tab === 'grading' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/grading">${icon('clipboard-check', 13)} ตรวจคำตอบ ${metrics.pendingReview ? `<span class="exam-tab__count exam-tab__count--alert">${metrics.pendingReview}</span>` : ''}</a>` : ''}
     ${canViewStats ? `<a class="exam-tab ${tab === 'stats' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/stats">${icon('chart', 13)} สถิติ</a>` : ''}
   </div>
   ${!canViewStats ? `<div class="exam-stats-locked">${icon('lock', 13)} ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นดูได้อย่างเดียว · สถิติจะเปิดให้ดูเมื่อปิดสอบแล้ว</div>` : ''}`;
 }
 
-function overviewTab(exam, metrics, canManage = false, canViewStats = true) {
+function overviewTab(exam, metrics, canManage = false, canViewStats = true, canReview = false) {
   const db = getDB();
+  const reviewers = (exam.reviewerIds || [])
+    .map(id => db.teachers.find(t => t.id === id && !t.deletedAt))
+    .filter(Boolean);
   const statsLocked = !canViewStats;
   const recent = statsLocked ? [] : getExamAttempts(exam.id)
     .filter(a => a.status !== 'in_progress')
@@ -548,8 +553,8 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true) {
         </div>
       </section>
       <section class="teacher-card">
-        <div class="teacher-card__head"><div><h2>คำตอบล่าสุด</h2><p>เปิดตรวจคำตอบของนักเรียนแต่ละคน</p></div>${canManage ? `<a class="teacher-card__link" href="#/teacher/exam/${exam.id}/grading">ไปหน้าตรวจ ${icon('arrow-right', 12)}</a>` : ''}</div>
-        <div class="submission-list">${recent.length ? recentSubmissionRows(recent, 5, canManage) : `<div style="padding:0 19px 19px">${emptyState({ iconName: 'inbox', title: 'ยังไม่มีคำตอบ', text: 'รอให้นักเรียนส่งคำตอบเข้ามา' })}</div>`}</div>
+        <div class="teacher-card__head"><div><h2>คำตอบล่าสุด</h2><p>เปิดตรวจคำตอบของนักเรียนแต่ละคน</p></div>${canReview ? `<a class="teacher-card__link" href="#/teacher/exam/${exam.id}/grading">ไปหน้าตรวจ ${icon('arrow-right', 12)}</a>` : ''}</div>
+        <div class="submission-list">${recent.length ? recentSubmissionRows(recent, 5, canReview) : `<div style="padding:0 19px 19px">${emptyState({ iconName: 'inbox', title: 'ยังไม่มีคำตอบ', text: 'รอให้นักเรียนส่งคำตอบเข้ามา' })}</div>`}</div>
       </section>`;
   return `<div class="exam-overview-grid">
     <div class="exam-overview-main">
@@ -577,6 +582,14 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true) {
           <div class="overview-info-row"><span>${icon('timer', 11)} ปิดรับ</span><strong>${thaiDateTime(exam.closeAt)}</strong></div>
           <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์ครูอื่น</span><strong>${exam.shareMode === 'edit' ? 'แก้ไขได้' : 'ดูอย่างเดียว'}</strong></div>
         </div>
+      </div>
+      <div class="overview-panel card">
+        <div class="overview-panel__head"><div><h2>ผู้ตรวจคำตอบ</h2></div>${canManage ? `<button class="btn btn--link" style="font-size:9px" type="button" data-edit-reviewers>เลือกผู้ตรวจ</button>` : ''}</div>
+        ${reviewers.length
+          ? `<div class="reviewer-list">${reviewers.map(t => `<span class="class-chip">${e(t.name)}${t.code ? ` · ${e(t.code)}` : ''}</span>`).join('')}</div>`
+          : `<p style="font-size:9.5px;color:var(--muted);margin:0">${canManage ? 'ยังไม่ได้เลือก · เฉพาะคุณและ Wich ที่ตรวจได้' : 'เฉพาะเจ้าของชุดสอบและ Wich'}</p>`}
+        <p style="font-size:9px;color:var(--muted);margin-top:9px">ผู้ที่ได้รับมอบหมายเห็นคิวตรวจและให้คะแนนได้ แต่เปิด/ปิดหรือแก้ไขชุดสอบไม่ได้</p>
+        ${!canManage && canReview ? `<div class="notice-strip notice-strip--success" style="margin-top:10px">${icon('check-circle', 13)}<span>คุณได้รับมอบหมายให้ตรวจชุดสอบนี้</span></div>` : ''}
       </div>
       <div class="overview-panel card">
         <div class="overview-panel__head"><div><h2>การแสดงผลให้นักเรียน</h2></div>${canManage ? `<button class="btn btn--link" style="font-size:9px" type="button" data-announce>แก้ไข</button>` : ''}</div>
@@ -917,8 +930,51 @@ async function confirmDeleteExam(examId, session) {
   else refreshRoute();
 }
 
+function openReviewerModal(exam, session) {
+  const db = getDB();
+  const current = new Set(Array.isArray(exam.reviewerIds) ? exam.reviewerIds : []);
+  const candidates = visibleStaff(session, db)
+    .filter(t => t.id !== exam.teacherId && !t.isOwner)
+    .filter(t => canViewExam(exam, {
+      role: 'teacher', teacherId: t.id, orgId: t.orgId, staffRole: t.staffRole
+    }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'th'));
+  openModal({
+    title: 'เลือกผู้ตรวจคำตอบ',
+    eyebrow: 'สิทธิ์การตรวจ',
+    size: 'md',
+    body: `<div class="notice-strip notice-strip--info" style="margin-bottom:12px">${icon('info', 14)}<span>ผู้ที่เลือกจะเห็นคำตอบของชุดสอบนี้ในคิวตรวจ ให้คะแนนได้ และได้รับการแจ้งเตือนเมื่อมีคำตอบใหม่ แต่จะเปิด/ปิดหรือแก้ไขชุดสอบไม่ได้</span></div>
+      ${candidates.length ? `<div class="reviewer-picker">${candidates.map(t => `<label class="reviewer-option">
+        <input type="checkbox" data-reviewer value="${e(t.id)}" ${current.has(t.id) ? 'checked' : ''}>
+        <span><strong>${e(t.name)}</strong><small>${e(t.code || '')} · ${e(findOrganization(t.orgId, db)?.name || t.school || '—')}</small></span>
+      </label>`).join('')}</div>` : `<div class="notice-strip">${icon('users', 14)}<span>ยังไม่มีครูคนอื่นในหน่วยงานนี้ให้เลือก</span></div>`}
+      <p style="font-size:9px;color:var(--muted);margin-top:11px">Wich และเจ้าของชุดสอบตรวจได้เสมอ · ไม่เลือกใคร = เฉพาะเจ้าของและ Wich</p>`,
+    footer: `<button class="btn btn--ghost" type="button" data-modal-close>ยกเลิก</button>
+      <button class="btn btn--primary" type="button" data-save-reviewers ${candidates.length ? '' : 'disabled'}>${icon('save', 14)} บันทึกผู้ตรวจ</button>`,
+    onMount(overlay) {
+      overlay.querySelector('[data-save-reviewers]')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        if (btn.disabled) return;
+        btn.disabled = true;
+        const ids = [...overlay.querySelectorAll('[data-reviewer]:checked')].map(el => el.value);
+        const result = setExamReviewers(exam.id, ids, session);
+        if (!result.ok) {
+          toast(result.error || 'บันทึกผู้ตรวจไม่สำเร็จ', 'error');
+          btn.disabled = false;
+          return;
+        }
+        await result.pending;
+        closeModal();
+        toast(ids.length ? `เลือกผู้ตรวจ ${ids.length} คนแล้ว` : 'ตั้งค่าให้เฉพาะเจ้าของและ Wich ตรวจแล้ว', 'success');
+        refreshRoute();
+      });
+    }
+  });
+}
+
 function bindExamActions(exam, session) {
   bindDeleteExamButtons(session);
+  document.querySelectorAll('[data-edit-reviewers]').forEach(btn => btn.addEventListener('click', () => openReviewerModal(exam, session)));
   document.querySelectorAll('[data-publish-exam]').forEach(btn => btn.addEventListener('click', async () => {
     const ok = await confirmDialog({
       title: 'เผยแพร่ชุดสอบให้ครูทุกคนเห็น?',
@@ -1101,11 +1157,13 @@ export function teacherExamView(ctx) {
   }
   if (!canViewExam(exam, session)) return examAccessDenied(session);
   const canManage = canManageExam(exam, session);
+  const canReview = canReviewExam(exam, session);
   const canEdit = canEditExam(exam, session);
   const canViewStats = canViewExamStats(exam, session);
   const requested = ['overview', 'students', 'grading', 'stats'].includes(ctx.tab) ? ctx.tab : 'overview';
   const allowed = requested === 'overview'
-    || ((requested === 'students' || requested === 'grading') && canManage)
+    || (requested === 'students' && canManage)
+    || (requested === 'grading' && canReview)
     || (requested === 'stats' && canViewStats);
   const tab = allowed ? requested : 'overview';
   const metrics = examMetrics(exam);
@@ -1113,8 +1171,8 @@ export function teacherExamView(ctx) {
   if (tab === 'students') tabContent = studentsTab(exam, metrics);
   else if (tab === 'grading') tabContent = gradingTab(exam, metrics);
   else if (tab === 'stats') tabContent = statsTab(exam, metrics);
-  else tabContent = overviewTab(exam, metrics, canManage, canViewStats);
-  const content = `${examHeader(exam, metrics, { tab, canManage, canEdit, canViewStats })}
+  else tabContent = overviewTab(exam, metrics, canManage, canViewStats, canReview);
+  const content = `${examHeader(exam, metrics, { tab, canManage, canEdit, canViewStats, canReview })}
     <div data-tab-content>${tabContent}</div>`;
   return {
     html: teacherShell(session, { active: 'exams', crumb: exam.shortTitle || exam.title, content }),
@@ -1123,8 +1181,9 @@ export function teacherExamView(ctx) {
       if (canManage) {
         bindExamActions(exam, session);
         if (tab === 'students') bindStudentsTab(exam, metrics);
-        if (tab === 'grading') bindGradingTab(exam);
-      } else {
+      }
+      if (canReview && tab === 'grading') bindGradingTab(exam);
+      if (!canManage) {
         document.querySelectorAll('[data-copy-link]').forEach(btn => btn.addEventListener('click', async () => {
           const base = `${window.location.origin}${window.location.pathname}`;
           await copyText(`${base}#/login?code=${exam.code}&fresh=1`);
@@ -1150,9 +1209,9 @@ export function teacherAnswerView(ctx) {
       mount: () => mountTeacherShell(session)
     };
   }
-  if (!canManageExam(exam, session)) {
+  if (!canReviewExam(exam, session)) {
     return {
-      html: teacherShell(session, { active: 'review', crumb: 'อ่านอย่างเดียว', content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'เฉพาะเจ้าของชุดสอบและ Wich', text: 'คุณดูข้อมูลชุดสอบได้ แต่ไม่มีสิทธิ์เปิดตรวจหรือให้คะแนนคำตอบของครูท่านอื่น', action: `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/overview">ดูภาพรวมชุดสอบ</a>` })}</div>` }),
+      html: teacherShell(session, { active: 'review', crumb: 'อ่านอย่างเดียว', content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'เฉพาะผู้ที่ได้รับมอบหมาย', text: 'คุณดูข้อมูลชุดสอบได้ แต่ไม่มีสิทธิ์เปิดตรวจหรือให้คะแนนคำตอบของชุดสอบนี้', action: `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/overview">ดูภาพรวมชุดสอบ</a>` })}</div>` }),
       mount: () => mountTeacherShell(session)
     };
   }
@@ -1235,7 +1294,7 @@ export function teacherAnswerView(ctx) {
 
   const content = `<div class="answer-detail-shell print-area">
     ${makePrintHeader(`คำตอบของ ${attempt.studentName}`, `${exam.title} · ${attempt.submittedAt ? thaiDateTime(attempt.submittedAt) : ''}`)}
-    <a class="page-back no-print" href="#/teacher/exam/${exam.id}/students">${icon('arrow-left', 15)} กลับรายชื่อผู้เข้าสอบ</a>
+    <a class="page-back no-print" href="#/teacher/exam/${exam.id}/grading">${icon('arrow-left', 15)} กลับคิวตรวจ</a>
     <div class="answer-student-hero">
       <div class="answer-student-hero__main">
         ${avatar(attempt.studentName, attempt.studentId, 'lg')}
@@ -1366,7 +1425,7 @@ export function teacherReviewView(ctx) {
   const all = db.attempts
     .filter(a => a.status !== 'in_progress')
     .map(a => ({ attempt: a, exam: db.exams.find(x => x.id === a.examId) }))
-    .filter(x => x.exam && canManageExam(x.exam, session))
+    .filter(x => x.exam && canReviewExam(x.exam, session))
     .sort((a, b) => new Date(b.attempt.submittedAt) - new Date(a.attempt.submittedAt));
   const needsReview = ({ attempt, exam }) => !attempt.reviewed || pendingEssayQuestions(exam, attempt).length > 0;
   const pending = all.filter(needsReview).length;

@@ -290,7 +290,7 @@ export async function cloudLookupExam(code) {
   }
 }
 
-export async function cloudGuestLogin(examId, studentId) {
+export async function cloudGuestLogin(examId, studentId, password = '') {
   if (!isCloudEnabled()) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
   const supa = getClient();
   let { data: { session } } = await supa.auth.getSession();
@@ -306,11 +306,14 @@ export async function cloudGuestLogin(examId, studentId) {
   }
   const { error: claimError } = await supa.rpc('claim_guest', {
     p_exam_id: examId,
-    p_student_id: studentId
+    p_student_id: studentId,
+    p_password: String(password || '')
   });
   if (claimError) {
     const raw = String(claimError.message || '');
-    const friendly = raw.includes('exam not open')
+    const friendly = raw.includes('invalid password')
+      ? 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของบัญชีที่เลือก'
+      : raw.includes('exam not open')
       ? 'ชุดสอบนี้ยังไม่เปิดหรือปิดรับคำตอบแล้ว กรุณาติดต่อครูผู้สอน'
       : raw.includes('student not assigned')
         ? 'ชื่อนี้ไม่ได้รับสิทธิ์เข้าสอบชุดนี้ กรุณาติดต่อครูผู้สอน'

@@ -436,12 +436,18 @@ export function authView(ctx) {
           </select>
           <span class="field__hint">เห็นเฉพาะ ${roster.length} คนที่ได้รับสิทธิ์เข้าสอบชุดนี้</span>
         </div>
+        <div class="field" style="margin-top:12px">
+          <label for="guest-password">รหัสผ่านของบัญชีนักเรียนที่เลือก</label>
+          <div class="input-with-icon">${icon('lock', 17)}<input class="input input--lg" id="guest-password" type="password" placeholder="รหัสผ่านเริ่มต้น 123456" autocomplete="current-password"></div>
+          <span class="field__hint">ต้องตรงกับรหัสผ่านของชื่อที่เลือก · ค่าเริ่มต้น <strong>123456</strong> · หากลืมให้ครูรีเซ็ตให้</span>
+        </div>
         <div class="form-error" data-guest-error style="margin-top:13px">${icon('alert-circle', 15)}<span></span></div>
         <div class="modal-note">${icon('shield-check', 14)} ระบบจะบันทึกคำตอบภายใต้ชื่อที่เลือก และเริ่มนับเวลาเมื่อเข้าสู่คำชี้แจง</div>`,
         footer: `<button class="btn btn--ghost" type="button" data-modal-close>ยกเลิก</button>
           <button class="btn btn--primary" type="button" data-guest-confirm>${icon('arrow-right', 16)} ไปที่คำชี้แจง</button>`,
         onMount(overlay) {
           const select = overlay.querySelector('#guest-student');
+          const password = overlay.querySelector('#guest-password');
           const error = overlay.querySelector('[data-guest-error]');
           const submit = async () => {
             const student = roster.find(s => s.id === select.value);
@@ -452,16 +458,26 @@ export function authView(ctx) {
               select.focus();
               return;
             }
+            if (!password.value.trim()) {
+              error.querySelector('span').textContent = 'กรุณากรอกรหัสผ่านของบัญชีที่เลือก';
+              error.classList.add('is-visible');
+              password.setAttribute('aria-invalid', 'true');
+              password.focus();
+              return;
+            }
             const confirmBtn = overlay.querySelector('[data-guest-confirm]');
             if (confirmBtn.disabled) return;
             confirmBtn.disabled = true;
             error.classList.remove('is-visible');
             await freshSignOut;
-            const result = await cloudGuestLogin(exam.id, student.id);
+            const result = await cloudGuestLogin(exam.id, student.id, password.value.trim());
             if (!result.ok) {
               confirmBtn.disabled = false;
               error.querySelector('span').textContent = result.error || 'ยืนยันตัวตนไม่สำเร็จ';
               error.classList.add('is-visible');
+              password.setAttribute('aria-invalid', 'true');
+              password.focus();
+              password.select();
               return;
             }
             setSession(result.session);
@@ -474,7 +490,10 @@ export function authView(ctx) {
           select.addEventListener('change', () => {
             error.classList.remove('is-visible');
             select.removeAttribute('aria-invalid');
+            password.removeAttribute('aria-invalid');
+            password.focus();
           });
+          password.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } });
           select.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } });
         }
       });

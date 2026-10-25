@@ -1054,6 +1054,7 @@ export function createExamView(ctx) {
           openedAt: mode === 'open' ? now.toISOString() : null,
           createdAt: now.toISOString(),
           publishedAt: null,
+          reviewerIds: [],
           settings: { showScore: true, showSolutions: true, showRank: false }
         };
         exam.totalPoints = exam.questions.reduce((sum, q) => sum + Number(q.points), 0);

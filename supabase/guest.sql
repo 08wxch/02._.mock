@@ -31,7 +31,9 @@ $$;
 revoke all on function public.current_student_id() from public;
 grant execute on function public.current_student_id() to authenticated;
 
-create or replace function public.claim_guest(p_exam_id text, p_student_id text)
+drop function if exists public.claim_guest(text, text);
+
+create or replace function public.claim_guest(p_exam_id text, p_student_id text, p_password text)
 returns void
 language plpgsql
 security definer
@@ -41,6 +43,7 @@ declare
   v_state jsonb;
   v_student jsonb;
   v_exam jsonb;
+  v_password text;
 begin
   if auth.uid() is null then
     raise exception 'not authenticated';
@@ -59,6 +62,16 @@ begin
     raise exception 'student not found';
   end if;
 
+  select password into v_password
+  from public.credentials
+  where owner_type = 'student' and owner_id = p_student_id;
+  if v_password is null then
+    v_password := '123456';
+  end if;
+  if p_password is null or p_password <> v_password then
+    raise exception 'invalid password';
+  end if;
+
   select value into v_exam
   from jsonb_array_elements(coalesce(v_state->'exams', '[]'::jsonb))
   where value->>'id' = p_exam_id
@@ -67,6 +80,14 @@ begin
     raise exception 'exam not found';
   end if;
   if coalesce(v_exam->>'status', '') <> 'open' then
+    raise exception 'exam not open';
+  end if;
+  if nullif(v_exam->>'openAt', '') is not null
+     and (v_exam->>'openAt')::timestamptz > now() then
+    raise exception 'exam not open';
+  end if;
+  if nullif(v_exam->>'closeAt', '') is not null
+     and (v_exam->>'closeAt')::timestamptz < now() then
     raise exception 'exam not open';
   end if;
 
@@ -85,8 +106,8 @@ begin
         expires_at = now() + interval '8 hours';
 end;
 $$;
-revoke all on function public.claim_guest(text, text) from public;
-grant execute on function public.claim_guest(text, text) to authenticated;
+revoke all on function public.claim_guest(text, text, text) from public;
+grant execute on function public.claim_guest(text, text, text) to authenticated;
 
 drop policy if exists attempts_read on public.attempts;
 create policy attempts_read on public.attempts
