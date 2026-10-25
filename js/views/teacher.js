@@ -2174,7 +2174,7 @@ export function teacherStaffView(ctx) {
   const owner = isOwnerTeacher(session);
   const globalAccess = hasAllOrganizationAccess(session);
   const canManageOrgs = canManageOrganizations(session);
-  const manager = isManagerStaff(session) || canManageOrgs;
+  const manager = isManagerStaff(session);
   const me = currentTeacher(session);
   const orgs = visibleOrganizations(session, db);
   const activeTeachers = visibleStaff(session, db, 'all');
@@ -2188,7 +2188,7 @@ export function teacherStaffView(ctx) {
     const examCount = db.exams.filter(exam => exam.teacherId === t.id).length;
     const publishedCount = db.exams.filter(exam => exam.teacherId === t.id && exam.status !== 'draft').length;
     const roleLabel = t.roleLabel || (t.staffRole === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน');
-    const canManageCard = owner || (manager && (t.orgId === me?.orgId || canManageOrgs));
+    const canManageCard = owner || canManageOrgs;
     return `<article class="staff-card ${t.isOwner ? 'staff-card--owner' : ''}">
       <div class="staff-card__head">
         <button class="staff-card__person" type="button" data-staff-open="${e(t.id)}" aria-label="เปิดข้อมูล ${e(t.name)}">
@@ -2217,9 +2217,9 @@ export function teacherStaffView(ctx) {
   const scopeName = orgFilter === 'all' ? 'ทุกหน่วยงาน' : findOrganization(orgFilter, db)?.name || 'หน่วยงาน';
   const myOrg = findOrganization(me?.orgId, db);
   const content = `<div class="teacher-page-head">
-    <div><div class="eyebrow">${icon('school', 12)} การจัดการทีม</div><h1>ครูและบุคลากร</h1><p>${globalAccess ? `${e(myOrg?.name || 'หน่วยงานของฉัน')} · ${e(myOrg?.shortName || '—')}` : manager ? `ผู้จัดการเพิ่มหรือลบครูได้เฉพาะใน ${e(scopeName)} · สร้างได้เฉพาะบัญชีครู` : `บุคลากรใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว`}</p></div>
+    <div><div class="eyebrow">${icon('school', 12)} การจัดการทีม</div><h1>ครูและบุคลากร</h1><p>${globalAccess ? `${e(myOrg?.name || 'หน่วยงานของฉัน')} · ${e(myOrg?.shortName || '—')}` : canManageOrgs ? `จัดการบัญชีครูใน ${e(scopeName)} · หน่วยงานนี้มีสิทธิ์จัดการองค์กร` : manager ? `ผู้จัดการใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว` : `บุคลากรใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว`}</p></div>
     <div class="teacher-page-head__actions">
-      ${owner || canManageOrgs ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} สร้างบัญชีครู / ผู้จัดการ</button>` : manager ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} เพิ่มครูในหน่วยงาน</button>` : `<span class="badge badge--neutral">${icon('eye', 11)} อ่านอย่างเดียว</span>`}
+      ${owner || canManageOrgs ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} สร้างบัญชีครู / ผู้จัดการ</button>` : `<span class="badge badge--neutral">${icon('eye', 11)} อ่านอย่างเดียว</span>`}
     </div>
   </div>
   ${canManageOrgs ? organizationCards(db, canManageOrgs, me?.orgId, session) : `<div class="notice-strip notice-strip--info" style="margin-bottom:14px">${icon('school', 15)}<span><strong>${e(scopeName)}</strong> · ชื่อย่อ ${e(findOrganization(me.orgId, db)?.shortName || '—')}</span></div>`}
@@ -2231,7 +2231,7 @@ export function teacherStaffView(ctx) {
   </div>
   ${globalAccess ? `<div class="table-toolbar staff-toolbar">${filterSelect}<span class="table-caption">แสดง ${teachers.length} คน · ${e(scopeName)}</span></div>` : ''}
   <div class="notice-strip notice-strip--info" style="margin-bottom:16px">${icon('shield-check', 15)}<span><strong>สิทธิ์:</strong> ${globalAccess ? 'หน่วยงานหลักเห็นข้อมูลบุคลากร นักเรียน และชุดสอบของทุกหน่วยงาน' : 'ครูในหน่วยงานเห็นนักเรียนและบุคลากรของหน่วยงานตนเองเท่านั้น'}</span></div>
-  <div class="staff-grid">${cards || `<div class="card">${emptyState({ iconName: 'users', title: 'ยังไม่มีบุคลากรในขอบเขตนี้', text: owner || canManageOrgs ? 'สร้างบัญชีครูคนแรกในหน่วยงานนี้' : manager ? 'เพิ่มบัญชีครูคนแรกในหน่วยงานของคุณ' : 'ยังไม่มีบัญชีครูในหน่วยงานของคุณ' })}</div>`}</div>`;
+  <div class="staff-grid">${cards || `<div class="card">${emptyState({ iconName: 'users', title: 'ยังไม่มีบุคลากรในขอบเขตนี้', text: owner || canManageOrgs ? 'สร้างบัญชีครูคนแรกในหน่วยงานนี้' : 'ยังไม่มีบัญชีครูในหน่วยงานของคุณ' })}</div>`}</div>`;
   return {
     html: teacherShell(session, { active: 'staff', crumb: 'ครูและบุคลากร', content }),
     mount() {
@@ -2327,10 +2327,9 @@ function openStaffDetailModal(teacherId, session) {
   if (!teacher) { toast('ไม่พบบัญชีนี้', 'error'); return; }
   const owner = isOwnerTeacher(session);
   const globalAccess = hasAllOrganizationAccess(session);
-  const manager = isManagerStaff(session);
   const canManageOrgs = canManageOrganizations(session);
   const me = currentTeacher(session);
-  const canManageStaff = owner || (manager && (teacher.orgId === me?.orgId || canManageOrgs));
+  const canManageStaff = owner || canManageOrgs;
   if (!owner && !globalAccess && !teacher.isOwner && teacher.orgId !== me?.orgId) {
     toast('คุณไม่มีสิทธิ์ดูบัญชีนอกหน่วยงาน', 'error');
     return;
@@ -2339,7 +2338,7 @@ function openStaffDetailModal(teacherId, session) {
   const roleLabel = teacher.roleLabel || (teacher.isOwner ? 'ผู้สร้างระบบ' : teacher.staffRole === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน');
   const examCount = db.exams.filter(exam => exam.teacherId === teacher.id).length;
   const canDelete = owner ? !teacher.isOwner : canManageStaff && !teacher.isOwner && teacher.staffRole === 'teacher' && (canManageOrgs || teacher.orgId === me?.orgId) && teacher.id !== me?.id;
-  const canMove = (owner || (manager && canManageOrgs)) && !teacher.isOwner;
+  const canMove = (owner || canManageOrgs) && !teacher.isOwner;
   const canEditCode = !teacher.isOwner && (owner || (canManageStaff
     && (teacher.staffRole !== 'manager' || teacher.id === session.teacherId)));
   const isSelf = teacher.id === session.teacherId;
@@ -2538,8 +2537,7 @@ function openCreateTeacherModal(session, defaultOrgId = '') {
   const owner = isOwnerTeacher(session);
   const globalManager = canManageOrganizations(session);
   const admin = owner || globalManager;
-  const manager = isManagerStaff(session);
-  if (!admin && !manager) { toast('คุณไม่มีสิทธิ์สร้างบัญชีครู', 'error'); return; }
+  if (!admin) { toast('เฉพาะ Wich หรือผู้จัดการในหน่วยงานที่มีสิทธิ์จัดการองค์กรเท่านั้นที่สร้างบัญชีครูได้', 'error'); return; }
   const me = currentTeacher(session);
   const orgs = admin ? visibleOrganizations(session, db) : db.organizations.filter(o => o.id === me?.orgId);
   if (!orgs.length) { toast('สร้างหน่วยงานก่อนเพิ่มบัญชีครู', 'error'); return; }

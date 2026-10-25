@@ -1289,10 +1289,8 @@ export function generateStudentCode(db = getDB(), org = null) {
 export function addTeacher({ name, orgId, staffRole = 'teacher', code, password } = {}, actor = null) {
   const actorTeacher = currentTeacher(actor);
   const owner = isOwnerTeacher(actor);
-  const manager = isManagerStaff(actor);
   const globalManager = canManageOrganizations(actor);
-  if (!owner && !manager && !globalManager) return { ok: false, error: 'เฉพาะ Wich ผู้จัดการหน่วยงาน หรือหน่วยงานหลักเท่านั้นที่สร้างบัญชีครูได้' };
-  if (manager && !globalManager && staffRole === 'manager') return { ok: false, error: 'ผู้จัดการสร้างได้เฉพาะบัญชีครูผู้สอน' };
+  if (!owner && !globalManager) return { ok: false, error: 'เฉพาะ Wich หรือผู้จัดการในหน่วยงานที่มีสิทธิ์จัดการองค์กรเท่านั้นที่สร้างบัญชีครูได้' };
   const db = getDB();
   const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
   const role = (owner || globalManager) && staffRole === 'manager' ? 'manager' : 'teacher';
@@ -1371,16 +1369,9 @@ export function removeTeacher(teacherId, actor = null) {
   if (teacher.isOwner) return { ok: false, error: 'ไม่สามารถลบบัญชีเจ้าของระบบได้' };
   if (actor?.role === 'teacher' && actor.teacherId === teacher.id) return { ok: false, error: 'ไม่สามารถลบบัญชีของตนเองได้' };
   const owner = isOwnerTeacher(actor);
-  const manager = isManagerStaff(actor);
   const globalManager = canManageOrganizations(actor);
-  if (!owner && !manager && !globalManager) return { ok: false, error: 'คุณไม่มีสิทธิ์ลบบัญชีนี้' };
-  if (!owner) {
-    if (manager) {
-      const me = currentTeacher(actor);
-      if (!me || teacher.orgId !== me.orgId) return { ok: false, error: 'ผู้จัดการลบบัญชีได้เฉพาะในหน่วยงานของตนเอง' };
-    }
-    if (teacher.staffRole !== 'teacher') return { ok: false, error: 'ลบได้เฉพาะบัญชีครูผู้สอน' };
-  }
+  if (!owner && !globalManager) return { ok: false, error: 'เฉพาะ Wich หรือผู้จัดการในหน่วยงานที่มีสิทธิ์จัดการองค์กรเท่านั้นที่ลบบัญชีได้' };
+  if (!owner && teacher.staffRole !== 'teacher') return { ok: false, error: 'ลบได้เฉพาะบัญชีครูผู้สอน' };
   teacher.deletedAt = new Date().toISOString();
   teacher.deletedBy = actor.teacherId;
   saveDB();
@@ -1750,8 +1741,7 @@ export function setTeacherCode(teacherId, nextCode, actor = null) {
   if (teacher.isOwner) return { ok: false, error: 'รหัสของ Wich Pitchon ถูกป้องกันและแก้ไขไม่ได้' };
   const me = currentTeacher(actor);
   const allowed = isOwnerTeacher(actor) || canManageOrganizations(actor)
-    || Boolean(me && isManagerStaff(actor) && me.orgId === teacher.orgId
-      && (teacher.staffRole !== 'manager' || teacher.id === me.id));
+    || Boolean(me && me.id === teacher.id);
   if (!allowed) return { ok: false, error: 'คุณไม่มีสิทธิ์แก้รหัสครูบัญชีนี้' };
   const code = String(nextCode || '').trim().toUpperCase();
   if (!/^[A-Z0-9._-]{3,24}$/.test(code)) {
