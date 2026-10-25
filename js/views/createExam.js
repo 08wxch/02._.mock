@@ -1,9 +1,9 @@
 import { icon } from '../icons.js';
 import { e, uid } from '../utils.js';
 import { toast, emptyState, confirmDialog } from '../ui.js';
-import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, isOwnerTeacher, findOrganization, examOrganizationId, examOrganizationName } from '../store.js';
+import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, isOwnerTeacher, findOrganization, examOrganizationIds, examOrganizationName, hasAllOrganizationAccess, organizationName } from '../store.js';
 import { mathText } from '../math.js';
-import { questionImageHTML } from '../questionMedia.js';
+import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { cloudUploadQuestionImage } from '../cloud.js';
 import { navigate } from '../router.js';
 import { teacherShell, mountTeacherShell } from './teacher.js';
@@ -12,10 +12,10 @@ let draft = null;
 
 function defaultOptions() {
   return [
-    { id: 'A', text: '' },
-    { id: 'B', text: '' },
-    { id: 'C', text: '' },
-    { id: 'D', text: '' }
+    { id: 'A', text: '', image: '', imagePath: '' },
+    { id: 'B', text: '', image: '', imagePath: '' },
+    { id: 'C', text: '', image: '', imagePath: '' },
+    { id: 'D', text: '', image: '', imagePath: '' }
   ];
 }
 
@@ -46,6 +46,7 @@ export function createExamDraft() {
     examId: null,
     status: 'draft',
     orgId: '',
+    orgIds: [],
     title: '',
     subject: 'คณิตศาสตร์',
     level: '',
@@ -63,15 +64,16 @@ export function createExamDraft() {
 
 function examToDraft(exam) {
   const db = getDB();
-  const examOrgId = examOrganizationId(exam, db) || db.teachers.find(t => t.id === exam.teacherId)?.orgId || '';
-  const orgStudentIds = new Set(db.students.filter(st => st.orgId === examOrgId).map(st => st.id));
+  const examOrgIds = examOrganizationIds(exam, db);
+  const orgStudentIds = new Set(db.students.filter(st => examOrgIds.includes(st.orgId)).map(st => st.id));
   const assigned = Array.isArray(exam.assignedStudentIds)
     ? exam.assignedStudentIds.filter(id => orgStudentIds.has(id))
     : [...orgStudentIds];
   return {
     examId: exam.id,
     status: exam.status,
-    orgId: examOrgId,
+    orgId: examOrgIds[0] || '',
+    orgIds: examOrgIds,
     title: exam.title || '',
     subject: 'คณิตศาสตร์',
     level: exam.level || '',
@@ -110,12 +112,24 @@ function questionEditor(q, index, total) {
   if (q.type === 'mcq') {
     body = `<div class="qb-answer-label">${icon('check-circle', 11)} เลือกวงกลมหน้าตัวเลือกที่ถูกต้อง</div>
       <div class="qb-options">
-        ${q.options.map(opt => `<div class="qb-option">
+        ${q.options.map(opt => `<div class="qb-option ${opt.image ? 'qb-option--has-image' : ''}">
           <input type="radio" name="correct-${q.id}" value="${opt.id}" ${q.correct === opt.id ? 'checked' : ''} aria-label="ตัวเลือก ${opt.id} เป็นคำตอบที่ถูก">
           <span class="qb-option__key">${opt.id}</span>
-          <input type="text" value="${e(opt.text)}" placeholder="ข้อความตัวเลือก ${opt.id} — ใช้ $...$ ได้" data-option-text="${opt.id}" aria-label="ข้อความตัวเลือก ${opt.id}">
+          <div class="qb-option__body">
+            <input type="text" value="${e(opt.text)}" placeholder="ข้อความตัวเลือก ${opt.id} — ใช้ $...$ ได้" data-option-text="${opt.id}" aria-label="ข้อความตัวเลือก ${opt.id}">
+            ${opt.image ? `<div class="qb-option__image">
+              <img src="${e(opt.image)}" alt="ภาพประกอบตัวเลือก ${opt.id}" loading="lazy">
+              <button class="btn btn--danger-ghost btn--sm" type="button" data-remove-option-image="${q.id}" data-option-id="${opt.id}">${icon('trash', 11)} ลบภาพ</button>
+            </div>` : ''}
+            <label class="qb-option__upload">
+              <input type="file" accept="image/png,image/jpeg,image/webp" data-q-option-image-input="${q.id}" data-option-id="${opt.id}">
+              ${icon('image', 12)}
+              <span data-option-image-status>${opt.image ? 'เปลี่ยนภาพตัวเลือก' : 'ใส่ภาพในตัวเลือกนี้'}</span>
+            </label>
+          </div>
         </div>`).join('')}
-      </div>`;
+      </div>
+      <div class="qb-helper">${icon('info', 11)} ตัวเลือกใส่รูปได้ทั้งข้อความและภาพ หรือเป็นภาพอย่างเดียวก็ได้ · ใช้ PNG, JPG หรือ WebP</div>`;
   } else if (q.type === 'truefalse') {
     body = `<div class="qb-answer-label">${icon('check-circle', 11)} เลือกคำตอบที่ถูกต้อง</div>
       <div class="qb-tf">
@@ -193,20 +207,29 @@ function renderQuestions(root) {
   updatePreview(root);
 }
 
-function participantSection(db, session, orgId = draft.orgId) {
+function participantStudents(session, db, orgIds = []) {
+  const wanted = new Set((orgIds || []).filter(Boolean));
+  if (!wanted.size) return [];
+  return visibleStudents(session, db, 'all').filter(student => wanted.has(student.orgId));
+}
+
+function participantSection(db, session, orgIds = draft.orgIds || []) {
   const selected = new Set(draft.assignedStudentIds);
-  const students = visibleStudents(session, db, orgId);
-  const studentIds = new Set(students.map(student => student.id));
+  const students = participantStudents(session, db, orgIds);
   const classes = (db.classes || []).filter(cls => students.some(student => classIdsOf(student).includes(cls.id)));
+  const orgLabels = [...new Set(students.map(student => student.orgId))]
+    .map(id => organizationName(id, db))
+    .join(' · ');
   if (!students.length) {
-    return `<div class="participant-empty">${icon('users', 19)}<div><strong>ยังไม่มีนักเรียนในหน่วยงานนี้</strong><span>เลือกหน่วยงานเจ้าของชุดสอบด้านบน หรือเพิ่มนักเรียนในหน่วยงานนี้ก่อนเปิดห้องสอบ</span></div><a class="btn btn--ghost btn--sm" href="#/teacher/students">ไปที่ทะเบียนนักเรียน</a></div>`;
+    return `<div class="participant-empty">${icon('users', 19)}<div><strong>ยังไม่มีนักเรียนในหน่วยงานที่เลือก</strong><span>เลือกหน่วยงานด้านบน หรือเพิ่มนักเรียนในหน่วยงานนั้นก่อนเปิดห้องสอบ</span></div><a class="btn btn--ghost btn--sm" href="#/teacher/students">ไปที่ทะเบียนนักเรียน</a></div>`;
   }
   const classFilter = classes.map(cls => {
     const count = students.filter(student => classIdsOf(student).includes(cls.id)).length;
-    return `<option value="${e(cls.id)}">${e(cls.code)} · ${count} คน</option>`;
+    const org = findOrganization(cls.orgId, db);
+    return `<option value="${e(cls.id)}">${e(org?.shortName || '')} · ${e(cls.code)} (${count} คน)</option>`;
   }).join('');
   return `<div class="participant-toolbar">
-      <div class="participant-count"><strong data-participant-count>${selected.size}</strong> คน <span>จาก ${students.length} คน · ${classes.length} class</span></div>
+      <div class="participant-count"><strong data-participant-count>${selected.size}</strong> คน <span>จาก ${students.length} คน · ${classes.length} class${orgLabels ? ` · ${e(orgLabels)}` : ''}</span></div>
       <div class="participant-toolbar__actions">
         <select class="select participant-filter" data-participant-filter aria-label="กรองรายชื่อตาม class">
           <option value="all">ทุก class</option>
@@ -221,10 +244,11 @@ function participantSection(db, session, orgId = draft.orgId) {
       ${students.map(student => {
         const ids = classIdsOf(student);
         const codes = classCodesOf(student, db);
+        const org = findOrganization(student.orgId, db);
         return `<label class="participant-student" data-participant-row data-participant-classes="${e(ids.join(' '))}">
           <input type="checkbox" data-participant="${e(student.id)}" ${selected.has(student.id) ? 'checked' : ''}>
           <span class="participant-student__copy"><strong>${e(student.name)}</strong><small>${e(student.code)}</small></span>
-          <span class="participant-student__chips">${codes.length ? codes.map(code => `<span class="class-chip">${e(code)}</span>`).join('') : `<span class="class-chip class-chip--empty">ไม่ระบุ</span>`}</span>
+          <span class="participant-student__chips"><span class="class-chip class-chip--org">${e(org?.shortName || '—')}</span>${codes.length ? codes.map(code => `<span class="class-chip">${e(code)}</span>`).join('') : `<span class="class-chip class-chip--empty">ไม่ระบุ</span>`}</span>
         </label>`;
       }).join('')}
     </div>`;
@@ -243,7 +267,7 @@ function summaryHTML(draftData, sourceExam) {
   const statusLabel = sourceExam
     ? (sourceExam.status === 'open' ? 'เปิดสอบอยู่' : sourceExam.status === 'announced' ? 'ประกาศผลแล้ว' : sourceExam.status === 'closed' ? 'ปิดรับคำตอบ' : sourceExam.status === 'saved' ? 'บันทึกแล้ว' : 'ฉบับร่าง')
     : 'ฉบับร่าง';
-  return `<div class="create-summary__line"><span>หน่วยงาน</span><strong>${e(examOrganizationName({ orgId: draftData.orgId }, getDB()))}</strong></div>
+  return `<div class="create-summary__line"><span>หน่วยงาน</span><strong>${e(examOrganizationName({ orgIds: draftData.orgIds || [draftData.orgId] }, getDB()))}</strong></div>
     <div class="create-summary__line"><span>จำนวนข้อ</span><strong>${draftData.questions.length} ข้อ</strong></div>
     <div class="create-summary__line"><span>คะแนนรวม</span><strong>${total} คะแนน</strong></div>
     <div class="create-summary__line"><span>เวลาทำ</span><strong>${draftData.duration} นาที</strong></div>
@@ -267,6 +291,12 @@ function syncDraft(root) {
   draft.duration = Number(field('duration')) || 30;
   draft.passPercent = Number(field('passPercent')) || 60;
   draft.shareMode = field('shareMode') === 'edit' ? 'edit' : 'view';
+  const orgBoxes = [...root.querySelectorAll('[data-exam-org]')];
+  if (orgBoxes.length) {
+    const ids = orgBoxes.filter(box => box.checked).map(box => box.dataset.examOrg).filter(Boolean);
+    draft.orgIds = [...new Set(ids)];
+    draft.orgId = draft.orgIds[0] || '';
+  }
   draft.assignedStudentIds = [...root.querySelectorAll('[data-participant]:checked')].map(cb => cb.dataset.participant);
   const card = root.querySelector('[data-question-builder]');
   if (!card) return;
@@ -287,7 +317,12 @@ function syncDraft(root) {
     q.options = q.options.map((opt, idx) => {
       const letter = String.fromCharCode(65 + idx);
       const input = card.querySelector(`[data-option-text="${letter}"]`);
-      return { id: letter, text: input ? input.value.trim() : opt.text };
+      return {
+        id: letter,
+        text: input ? input.value.trim() : opt.text,
+        image: opt.image || '',
+        imagePath: opt.imagePath || ''
+      };
     });
     q.correct = card.querySelector(`input[name="correct-${id}"]:checked`)?.value || old.correct || 'A';
     if (!['A', 'B', 'C', 'D'].includes(q.correct)) q.correct = 'A';
@@ -319,7 +354,7 @@ function previewHTML(question, index) {
   let body = '';
   if (question.type === 'mcq') {
     body = `<div class="live-preview__options">${question.options.map(opt => `<div class="live-preview__option ${question.correct === opt.id ? 'is-correct' : ''}">
-      <span>${opt.id}</span><div>${opt.text.trim() ? mathText(opt.text) : '<span class="muted">ตัวเลือกว่าง</span>'}</div>${question.correct === opt.id ? icon('check', 12) : ''}
+      <span>${opt.id}</span><div>${opt.text.trim() ? mathText(opt.text) : opt.image ? '' : '<span class="muted">ตัวเลือกว่าง</span>'}${optionImageHTML(opt, 'live-preview__option-image')}</div>${question.correct === opt.id ? icon('check', 12) : ''}
     </div>`).join('')}</div>`;
   } else if (question.type === 'truefalse') {
     body = `<div class="live-preview__options">
@@ -359,7 +394,9 @@ function showValidation(root, errors) {
 
 function validateDraft(session) {
   const errors = [];
-  if (!draft.orgId || !findOrganization(draft.orgId, getDB())) errors.push('กรุณาเลือกหน่วยงานเจ้าของชุดสอบ');
+  const orgIds = (draft.orgIds || []).filter(id => findOrganization(id, getDB()));
+  if (!orgIds.length) errors.push('กรุณาเลือกหน่วยงานที่ทำข้อสอบอย่างน้อย 1 แห่ง');
+  if (orgIds.length !== (draft.orgIds || []).length) errors.push('มีหน่วยงานที่เลือกไว้ไม่พบในระบบ กรุณาเลือกใหม่');
   if (draft.title.trim().length < 3) errors.push('กรุณากรอกชื่อชุดสอบอย่างน้อย 3 ตัวอักษร');
   if (!draft.subject) errors.push('กรุณาเลือกวิชา');
   if (draft.duration < 1 || draft.duration > 180) errors.push('เวลาทำข้อสอบต้องอยู่ระหว่าง 1–180 นาที');
@@ -370,13 +407,13 @@ function validateDraft(session) {
   if (!draft.closeAt || Number.isNaN(end.getTime())) errors.push('กรุณากำหนดวันและเวลาปิดรับ');
   if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end.getTime() <= start.getTime()) errors.push('วันและเวลาปิดรับต้องอยู่หลังวันเวลาเริ่มสอบ');
   if (!draft.assignedStudentIds.length) errors.push('เลือกผู้เข้าสอบอย่างน้อย 1 คน');
-  const allowedStudents = new Set(visibleStudents(session, getDB(), draft.orgId).map(student => student.id));
-  if (draft.assignedStudentIds.some(id => !allowedStudents.has(id))) errors.push('ผู้เข้าสอบต้องเป็นนักเรียนในหน่วยงานเดียวกับชุดสอบ');
+  const allowedStudents = new Set(participantStudents(session, getDB(), orgIds).map(student => student.id));
+  if (draft.assignedStudentIds.some(id => !allowedStudents.has(id))) errors.push('ผู้เข้าสอบต้องเป็นนักเรียนในหน่วยงานที่เลือก');
   if (!draft.questions.length) errors.push('ต้องมีคำถามอย่างน้อย 1 ข้อ');
   draft.questions.forEach((q, i) => {
     if (!q.text.trim() && !q.image) errors.push(`ข้อ ${i + 1}: ยังไม่ได้กรอกโจทย์หรือแนบภาพ`);
     if (!q.points || q.points <= 0) errors.push(`ข้อ ${i + 1}: คะแนนต้องมากกว่า 0`);
-    if (q.type === 'mcq' && q.options.some(o => !o.text.trim())) errors.push(`ข้อ ${i + 1}: กรอกตัวเลือกให้ครบทั้ง 4 ข้อ`);
+    if (q.type === 'mcq' && q.options.some(o => !o.text.trim() && !o.image)) errors.push(`ข้อ ${i + 1}: กรอกข้อความหรือใส่ภาพให้ครบทั้ง 4 ตัวเลือก`);
     if (q.type === 'short' && !q.acceptedAnswers.trim()) errors.push(`ข้อ ${i + 1}: กรุณากำหนดคำตอบที่ยอมรับอย่างน้อย 1 คำตอบ`);
   });
   return errors;
@@ -398,7 +435,7 @@ function serializeQuestions() {
       type: q.type,
       text: q.text.trim(),
       points: Number(q.points),
-      options: q.type === 'mcq' ? q.options.map(option => ({ id: option.id, text: option.text.trim() })) : undefined,
+      options: q.type === 'mcq' ? q.options.map(option => ({ id: option.id, text: option.text.trim(), image: String(option.image || '').trim(), imagePath: String(option.imagePath || '').trim() })) : undefined,
       correct: q.type === 'short' ? (accepted[0] || '') : q.correct,
       acceptedAnswers: accepted,
       reference: q.type === 'essay' ? q.reference.trim() : undefined,
@@ -479,6 +516,41 @@ async function handleQuestionImage(root, input) {
   }
 }
 
+async function handleOptionImage(root, input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const card = input.closest('[data-question-builder]');
+  const questionId = card?.dataset.questionBuilder;
+  const optionId = input.dataset.optionId;
+  if (!questionId || !optionId) return;
+  syncDraft(root);
+  const question = draft.questions.find(q => q.id === questionId);
+  const option = question?.options?.find(opt => opt.id === optionId);
+  if (!option) return;
+  const status = input.closest('.qb-option__upload')?.querySelector('[data-option-image-status]');
+  const label = input.closest('.qb-option__upload');
+  input.disabled = true;
+  label?.classList.add('is-uploading');
+  if (status) status.textContent = 'กำลังย่อและอัปโหลด...';
+  try {
+    const prepared = await prepareQuestionImage(file);
+    const uploaded = await cloudUploadQuestionImage(prepared);
+    if (!uploaded.ok) throw new Error(uploaded.error || 'อัปโหลดรูปไม่สำเร็จ');
+    option.image = uploaded.url;
+    option.imagePath = uploaded.path;
+    draft.activeQuestionId = question.id;
+    renderQuestions(root);
+    updateSummary(root);
+    toast('เพิ่มภาพในตัวเลือกแล้ว', 'success');
+  } catch (err) {
+    if (status) status.textContent = err?.message || 'อัปโหลดรูปไม่สำเร็จ';
+    input.disabled = false;
+    input.value = '';
+    label?.classList.remove('is-uploading');
+    toast(err?.message || 'อัปโหลดรูปไม่สำเร็จ', 'error', 6000);
+  }
+}
+
 function sampleDraft() {
   draft.title = 'คณิตศาสตร์ – แบบทดสอบหลังเรียน';
   draft.description = 'ทบทวนความเข้าใจเรื่องสมการและการแก้ปัญหา';
@@ -523,7 +595,15 @@ export function createExamView(ctx) {
     draft = createExamDraft();
   }
 
-  if (!draft.orgId) draft.orgId = teacher?.orgId || db.organizations[0]?.id || '';
+  if (!Array.isArray(draft.orgIds) || !draft.orgIds.length) {
+    draft.orgIds = [draft.orgId || teacher?.orgId || db.organizations[0]?.id].filter(Boolean);
+  }
+  const globalAccess = hasAllOrganizationAccess(session);
+  if (!globalAccess) {
+    draft.orgIds = [teacher?.orgId || db.organizations[0]?.id].filter(Boolean);
+  }
+  draft.orgIds = [...new Set(draft.orgIds.filter(id => findOrganization(id, db)))];
+  draft.orgId = draft.orgIds[0] || '';
 
   if (!draft.questions.some(q => q.id === draft.activeQuestionId)) {
     draft.activeQuestionId = draft.questions[0]?.id || '';
@@ -532,18 +612,28 @@ export function createExamView(ctx) {
   const backHref = isEdit ? `#/teacher/exam/${sourceExam.id}/overview` : '#/teacher/exams';
   const hasAttempts = isEdit && db.attempts.some(attempt => attempt.examId === sourceExam.id);
   const allOrgs = db.organizations || [];
-  const selectedOrg = findOrganization(draft.orgId, db) || allOrgs[0];
-  const orgField = isOwnerTeacher(session) && !hasAttempts
+  const selectedOrgs = draft.orgIds.map(id => findOrganization(id, db)).filter(Boolean);
+  const orgField = globalAccess && !hasAttempts
     ? `<div class="field">
-        <label for="exam-org">หน่วยงานเจ้าของชุดสอบ <span style="color:var(--coral)">*</span></label>
-        <select class="select" id="exam-org" data-exam-org>
-          ${allOrgs.map(org => `<option value="${e(org.id)}" ${org.id === selectedOrg?.id ? 'selected' : ''}>${e(org.name)} · ${e(org.shortName)}</option>`).join('')}
-        </select>
-        <p class="field__hint">${icon('building-2', 12)} Wich เลือกได้ว่าชุดสอบนี้เป็นของหน่วยงานใด · ครูในหน่วยงานนั้นเท่านั้นที่มองเห็น</p>
+        <label>หน่วยงาน / โรงเรียนที่ทำข้อสอบ <span style="color:var(--coral)">*</span></label>
+        <div class="org-picker" data-org-picker>
+          ${allOrgs.map(org => `<label class="org-picker__item ${draft.orgIds.includes(org.id) ? 'is-selected' : ''}">
+            <input type="checkbox" value="${e(org.id)}" data-exam-org="${e(org.id)}" ${draft.orgIds.includes(org.id) ? 'checked' : ''}>
+            <span class="org-picker__icon">${icon(org.type === 'school' ? 'school' : 'layout-dashboard', 15)}</span>
+            <span class="org-picker__copy"><strong>${e(org.name)}</strong><small>${e(org.shortName)} · ${org.accessLevel === 'manage_all' ? 'หน่วยงานหลัก' : org.accessLevel === 'view_all' ? 'เห็นทุกหน่วยงาน' : 'เห็นเฉพาะหน่วยงาน'}</small></span>
+            <span class="org-picker__check">${icon('check', 12)}</span>
+          </label>`).join('')}
+        </div>
+        <div class="org-picker__actions">
+          <button class="btn btn--link" type="button" data-select-all-orgs>เลือกทุกหน่วยงาน</button>
+          <span class="dot"></span>
+          <button class="btn btn--link" type="button" data-clear-orgs>ล้างที่เลือก</button>
+        </div>
+        <p class="field__hint">${icon('building-2', 12)} เลือกได้มากกว่า 1 หน่วยงาน · นักเรียนในทุกหน่วยงานที่เลือกจะเห็นชุดสอบนี้ · ครูในหน่วยงานที่เลือกเห็นชุดสอบได้</p>
       </div>`
     : `<div class="field">
-        <label>หน่วยงานเจ้าของชุดสอบ</label>
-        <div class="fixed-field">${icon('building-2', 15)}<strong>${e(selectedOrg?.name || 'ไม่ระบุหน่วยงาน')}</strong><span>${e(selectedOrg?.shortName || '')}</span></div>
+        <label>หน่วยงาน / โรงเรียนที่ทำข้อสอบ</label>
+        <div class="fixed-field">${icon('building-2', 15)}<strong>${e(selectedOrgs.map(org => org.name).join(' · ') || 'ไม่ระบุหน่วยงาน')}</strong><span>${e(selectedOrgs.map(org => org.shortName).join(' · '))}</span></div>
         <p class="field__hint">${icon('lock', 12)} ${hasAttempts ? 'ชุดสอบมีผู้เข้าสอบแล้ว จึงเปลี่ยนหน่วยงานไม่ได้' : 'ชุดสอบจะอยู่ภายใต้หน่วยงานของคุณ และครูต่างหน่วยงานจะมองไม่เห็น'}</p>
       </div>`;
 
@@ -596,7 +686,7 @@ export function createExamView(ctx) {
             <div><h2>ผู้เข้าสอบ <span class="required-mark">*</span></h2><p>กรองตาม class หรือเลือกเป็นรายคน · นักเรียนที่อยู่หลาย class จะแสดงครั้งเดียว · เฉพาะคนที่เลือกจะเข้าสอบชุดนี้ได้</p></div>
             <span class="form-card__step">2</span>
           </div>
-          <div data-participant-panel>${participantSection(db, session, draft.orgId)}</div>
+          <div data-participant-panel>${participantSection(db, session, draft.orgIds)}</div>
           <div class="qb-helper" style="margin-top:12px">${icon('shield-check', 11)} รายชื่อที่เลือกจะถูกใช้ตรวจสิทธิ์ทั้งการเข้าสอบด้วยรหัสและบัญชีนักเรียน · จำนวนที่เลือกนับเป็นรายคน</div>
         </section>
         <section class="form-card">
@@ -687,19 +777,33 @@ export function createExamView(ctx) {
         }
       });
       form.addEventListener('change', async ev => {
+        const optionImageInput = ev.target.closest('[data-q-option-image-input]');
+        if (optionImageInput) {
+          await handleOptionImage(root, optionImageInput);
+          return;
+        }
         const imageInput = ev.target.closest('[data-q-image-input]');
         if (imageInput) {
           await handleQuestionImage(root, imageInput);
           return;
         }
-        const orgSelect = ev.target.closest('[data-exam-org]');
-        if (orgSelect) {
+        const orgToggle = ev.target.closest('[data-exam-org]');
+        if (orgToggle) {
           syncDraft(root);
-          draft.orgId = orgSelect.value;
-          const allowed = new Set(visibleStudents(session, db, draft.orgId).map(student => student.id));
+          if (!draft.orgIds.length) {
+            draft.orgIds = [orgToggle.dataset.examOrg];
+            orgToggle.checked = true;
+            toast('ต้องเลือกหน่วยงานอย่างน้อย 1 แห่ง', 'warning');
+          }
+          draft.orgId = draft.orgIds[0] || '';
+          const allowed = new Set(participantStudents(session, db, draft.orgIds).map(student => student.id));
           draft.assignedStudentIds = draft.assignedStudentIds.filter(id => allowed.has(id));
+          root.querySelectorAll('.org-picker__item').forEach(item => {
+            const box = item.querySelector('[data-exam-org]');
+            item.classList.toggle('is-selected', Boolean(box?.checked));
+          });
           const panel = root.querySelector('[data-participant-panel]');
-          if (panel) panel.innerHTML = participantSection(db, session, draft.orgId);
+          if (panel) panel.innerHTML = participantSection(db, session, draft.orgIds);
           applyParticipantFilter(root);
           updateParticipantState(root);
           updateSummary(root);
@@ -756,6 +860,57 @@ export function createExamView(ctx) {
         if (clear) {
           root.querySelectorAll('[data-participant-row]:not(.hidden) [data-participant]').forEach(box => { box.checked = false; });
           refresh();
+          return;
+        }
+        const selectAllOrgs = ev.target.closest('[data-select-all-orgs]');
+        if (selectAllOrgs) {
+          syncDraft(root);
+          root.querySelectorAll('[data-exam-org]').forEach(box => { box.checked = true; });
+          draft.orgIds = [...root.querySelectorAll('[data-exam-org]')].map(box => box.dataset.examOrg);
+          draft.orgId = draft.orgIds[0] || '';
+          const allowed = new Set(participantStudents(session, db, draft.orgIds).map(student => student.id));
+          draft.assignedStudentIds = draft.assignedStudentIds.filter(id => allowed.has(id));
+          root.querySelectorAll('.org-picker__item').forEach(item => item.classList.add('is-selected'));
+          const panel = root.querySelector('[data-participant-panel]');
+          if (panel) panel.innerHTML = participantSection(db, session, draft.orgIds);
+          applyParticipantFilter(root);
+          updateParticipantState(root);
+          updateSummary(root);
+          return;
+        }
+        const clearOrgs = ev.target.closest('[data-clear-orgs]');
+        if (clearOrgs) {
+          const first = root.querySelector('[data-exam-org]');
+          syncDraft(root);
+          root.querySelectorAll('[data-exam-org]').forEach(box => { box.checked = false; });
+          if (first) first.checked = true;
+          draft.orgIds = first ? [first.dataset.examOrg] : [];
+          draft.orgId = draft.orgIds[0] || '';
+          const allowed = new Set(participantStudents(session, db, draft.orgIds).map(student => student.id));
+          draft.assignedStudentIds = draft.assignedStudentIds.filter(id => allowed.has(id));
+          root.querySelectorAll('.org-picker__item').forEach(item => {
+            const box = item.querySelector('[data-exam-org]');
+            item.classList.toggle('is-selected', Boolean(box?.checked));
+          });
+          const panel = root.querySelector('[data-participant-panel]');
+          if (panel) panel.innerHTML = participantSection(db, session, draft.orgIds);
+          applyParticipantFilter(root);
+          updateParticipantState(root);
+          updateSummary(root);
+          return;
+        }
+        const removeOptionImage = ev.target.closest('[data-remove-option-image]');
+        if (removeOptionImage) {
+          syncDraft(root);
+          const question = draft.questions.find(q => q.id === removeOptionImage.dataset.removeOptionImage);
+          const option = question?.options?.find(opt => opt.id === removeOptionImage.dataset.optionId);
+          if (!option) return;
+          option.image = '';
+          option.imagePath = '';
+          draft.activeQuestionId = question.id;
+          renderQuestions(root);
+          updateSummary(root);
+          toast('ลบภาพตัวเลือกแล้ว', 'info');
           return;
         }
         const removeImage = ev.target.closest('[data-remove-q-image]');
@@ -844,7 +999,8 @@ export function createExamView(ctx) {
           duration: Number(draft.duration),
           passPercent: Number(draft.passPercent),
           shareMode: draft.shareMode === 'edit' ? 'edit' : 'view',
-          orgId: draft.orgId,
+          orgId: draft.orgIds[0] || '',
+          orgIds: [...new Set(draft.orgIds)],
           openAt: new Date(draft.openAt).toISOString(),
           closeAt: new Date(draft.closeAt).toISOString(),
           assignedStudentIds: [...new Set(draft.assignedStudentIds)],

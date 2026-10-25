@@ -17,6 +17,7 @@ const organizations = [
     name: '02._.math',
     shortName: 'MATH',
     type: 'agency',
+    accessLevel: 'own',
     createdBy: 'teacher_1',
     createdAt: ago(120 * DAY)
   },
@@ -25,6 +26,7 @@ const organizations = [
     name: 'โรงเรียนสาธิตวิทยา',
     shortName: 'SAT',
     type: 'school',
+    accessLevel: 'own',
     createdBy: 'teacher_1',
     createdAt: ago(90 * DAY)
   }
@@ -585,7 +587,7 @@ function cleanClassCode(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
 
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 function normalizeOrgShort(value) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
@@ -698,12 +700,13 @@ function migrateDB(db) {
       name,
       shortName,
       type: o.type === 'school' ? 'school' : 'agency',
+      accessLevel: ['view_all', 'manage_all'].includes(o.accessLevel) ? o.accessLevel : 'own',
       createdAt: o.createdAt || new Date().toISOString()
     };
   });
   if (!db.organizations.length) {
     db.organizations.push({
-      id: 'org_math', name: '02._.math', shortName: 'MATH', type: 'agency',
+      id: 'org_math', name: '02._.math', shortName: 'MATH', type: 'agency', accessLevel: 'own',
       createdBy: owner?.id || 'teacher_1', createdAt: new Date().toISOString()
     });
     changed = true;
@@ -821,12 +824,24 @@ function migrateDB(db) {
       if (exam.teacherCode !== examTeacher.code) { exam.teacherCode = examTeacher.code; changed = true; }
       if (exam.teacherSchool !== examTeacher.school) { exam.teacherSchool = examTeacher.school; changed = true; }
     }
-    const knownOrg = orgById(exam.orgId);
-    if (!knownOrg) {
+    let orgIds = Array.isArray(exam.orgIds)
+      ? [...new Set(exam.orgIds.filter(id => orgById(id)))]
+      : [];
+    if (!orgIds.length) {
+      const knownOrg = orgById(exam.orgId);
       const assignedOrgId = Array.isArray(exam.assignedStudentIds)
         ? db.students.find(st => exam.assignedStudentIds.includes(st.id))?.orgId
         : null;
-      exam.orgId = orgById(assignedOrgId)?.id || examTeacher?.orgId || db.organizations[0]?.id;
+      const fallback = knownOrg?.id || orgById(assignedOrgId)?.id || examTeacher?.orgId || db.organizations[0]?.id;
+      if (fallback) orgIds = [fallback];
+    }
+    if (!orgIds.length) orgIds = [db.organizations[0].id];
+    if (!Array.isArray(exam.orgIds) || exam.orgIds.length !== orgIds.length || exam.orgIds.some((id, i) => id !== orgIds[i])) {
+      exam.orgIds = orgIds;
+      changed = true;
+    }
+    if (exam.orgId !== orgIds[0]) {
+      exam.orgId = orgIds[0];
       changed = true;
     }
   });
@@ -942,15 +957,24 @@ export function findOrganization(id, db = getDB()) {
   return (db.organizations || []).find(org => org.id === id) || null;
 }
 
-export function examOrganizationId(exam, db = getDB()) {
-  if (!exam) return '';
-  if (exam.orgId) return exam.orgId;
+export function examOrganizationIds(exam, db = getDB()) {
+  if (!exam) return [];
+  const ids = Array.isArray(exam.orgIds) ? exam.orgIds.filter(Boolean) : [];
+  if (ids.length) return [...new Set(ids)];
+  if (exam.orgId) return [exam.orgId];
   const creator = (db.teachers || []).find(t => t.id === exam.teacherId);
-  return creator?.orgId || '';
+  return creator?.orgId ? [creator.orgId] : [];
+}
+
+export function examOrganizationId(exam, db = getDB()) {
+  return examOrganizationIds(exam, db)[0] || '';
 }
 
 export function examOrganizationName(exam, db = getDB()) {
-  return findOrganization(examOrganizationId(exam, db), db)?.name || 'ไม่ระบุหน่วยงาน';
+  const names = examOrganizationIds(exam, db)
+    .map(id => findOrganization(id, db)?.name)
+    .filter(Boolean);
+  return names.length ? names.join(' · ') : 'ไม่ระบุหน่วยงาน';
 }
 
 export function organizationOfTeacher(teacher, db = getDB()) {
@@ -972,20 +996,35 @@ export function isManagerStaff(session) {
   return Boolean(teacher && !teacher.isOwner && teacher.staffRole === 'manager');
 }
 
-export function currentOrganization(session) {
-  return organizationOfTeacher(currentTeacher(session));
+export function organizationAccessLevel(org) {
+  return org && ['view_all', 'manage_all'].includes(org.accessLevel) ? org.accessLevel : 'own';
+}
+
+export function currentOrganization(session, db = getDB()) {
+  return organizationOfTeacher(currentTeacher(session), db);
+}
+
+export function hasAllOrganizationAccess(session, db = getDB()) {
+  if (isOwnerTeacher(session)) return true;
+  const org = currentOrganization(session, db);
+  return ['view_all', 'manage_all'].includes(organizationAccessLevel(org));
+}
+
+export function canManageOrganizations(session, db = getDB()) {
+  if (isOwnerTeacher(session)) return true;
+  return organizationAccessLevel(currentOrganization(session, db)) === 'manage_all';
 }
 
 export function canAccessStudent(student, session) {
   if (!student) return false;
-  if (isOwnerTeacher(session)) return true;
+  if (hasAllOrganizationAccess(session)) return true;
   const staff = currentTeacher(session);
   return Boolean(staff && staff.orgId && staff.orgId === student.orgId);
 }
 
 export function canAccessStaff(staff, session) {
   if (!staff) return false;
-  if (isOwnerTeacher(session)) return true;
+  if (hasAllOrganizationAccess(session)) return true;
   const me = currentTeacher(session);
   return Boolean(me && me.orgId && me.orgId === staff.orgId);
 }
@@ -997,7 +1036,7 @@ function staffOrder(a, b) {
 
 export function visibleStaff(session, db = getDB(), orgFilter = 'all') {
   const active = (db.teachers || []).filter(t => !t.deletedAt);
-  if (isOwnerTeacher(session)) {
+  if (hasAllOrganizationAccess(session, db)) {
     return active
       .filter(t => orgFilter === 'all' || t.orgId === orgFilter)
       .sort(staffOrder);
@@ -1005,13 +1044,13 @@ export function visibleStaff(session, db = getDB(), orgFilter = 'all') {
   const me = currentTeacher(session);
   if (!me) return [];
   return active
-    .filter(t => t.orgId === me.orgId || t.isOwner)
+    .filter(t => (t.orgId === me.orgId && (orgFilter === 'all' || t.orgId === orgFilter)) || t.isOwner)
     .sort(staffOrder);
 }
 
 export function visibleStudents(session, db = getDB(), orgFilter = 'all') {
   if (!session || session.role !== 'teacher') return [];
-  if (isOwnerTeacher(session)) {
+  if (hasAllOrganizationAccess(session, db)) {
     return (db.students || []).filter(s => orgFilter === 'all' || s.orgId === orgFilter);
   }
   const me = currentTeacher(session);
@@ -1021,7 +1060,7 @@ export function visibleStudents(session, db = getDB(), orgFilter = 'all') {
 
 export function visibleClasses(session, db = getDB(), orgFilter = 'all') {
   if (!session || session.role !== 'teacher') return [];
-  if (isOwnerTeacher(session)) {
+  if (hasAllOrganizationAccess(session, db)) {
     return (db.classes || []).filter(c => orgFilter === 'all' || c.orgId === orgFilter);
   }
   const me = currentTeacher(session);
@@ -1031,22 +1070,22 @@ export function visibleClasses(session, db = getDB(), orgFilter = 'all') {
 
 export function visibleExams(session, db = getDB()) {
   const exams = db.exams || [];
-  if (isOwnerTeacher(session)) return [...exams];
+  if (hasAllOrganizationAccess(session, db)) return [...exams];
   if (!session || session.role !== 'teacher') return exams.filter(exam => exam.status !== 'draft');
   const me = currentTeacher(session);
   if (!me) return [];
   const manager = isManagerStaff(session);
-  return exams.filter(exam => examOrganizationId(exam, db) === me.orgId
+  return exams.filter(exam => examOrganizationIds(exam, db).includes(me.orgId)
     && (manager || exam.status !== 'draft' || exam.teacherId === session.teacherId));
 }
 
 export function canViewExam(exam, session) {
   if (!exam) return false;
-  if (isOwnerTeacher(session)) return true;
+  if (hasAllOrganizationAccess(session)) return true;
   if (!session || session.role !== 'teacher') return exam.status !== 'draft';
   const me = currentTeacher(session);
   if (!me) return false;
-  if (examOrganizationId(exam) !== me.orgId) return false;
+  if (!examOrganizationIds(exam).includes(me.orgId)) return false;
   return isManagerStaff(session) || exam.status !== 'draft' || exam.teacherId === session.teacherId;
 }
 
@@ -1066,7 +1105,7 @@ export function canEditExam(exam, session) {
 
 export function canViewExamStats(exam, session) {
   if (!exam || !session || session.role !== 'teacher') return false;
-  if (isOwnerTeacher(session)) return true;
+  if (hasAllOrganizationAccess(session)) return true;
   return canViewExam(exam, session);
 }
 
@@ -1138,12 +1177,13 @@ export function addTeacher({ name, orgId, staffRole = 'teacher', code, password 
   const actorTeacher = currentTeacher(actor);
   const owner = isOwnerTeacher(actor);
   const manager = isManagerStaff(actor);
-  if (!owner && !manager) return { ok: false, error: 'เฉพาะ Wich หรือผู้จัดการหน่วยงานเท่านั้นที่สร้างบัญชีครูได้' };
-  if (manager && staffRole === 'manager') return { ok: false, error: 'ผู้จัดการสร้างได้เฉพาะบัญชีครูผู้สอน' };
+  const globalManager = canManageOrganizations(actor);
+  if (!owner && !manager && !globalManager) return { ok: false, error: 'เฉพาะ Wich ผู้จัดการหน่วยงาน หรือหน่วยงานหลักเท่านั้นที่สร้างบัญชีครูได้' };
+  if (manager && !globalManager && staffRole === 'manager') return { ok: false, error: 'ผู้จัดการสร้างได้เฉพาะบัญชีครูผู้สอน' };
   const db = getDB();
   const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
-  const role = owner && staffRole === 'manager' ? 'manager' : 'teacher';
-  const org = owner
+  const role = (owner || globalManager) && staffRole === 'manager' ? 'manager' : 'teacher';
+  const org = (owner || globalManager)
     ? (findOrganization(orgId, db) || findOrganization(actorTeacher?.orgId, db))
     : findOrganization(actorTeacher?.orgId, db);
   if (!org) return { ok: false, error: 'กรุณาเลือกหน่วยงานหรือโรงเรียน' };
@@ -1187,20 +1227,24 @@ export function addTeacher({ name, orgId, staffRole = 'teacher', code, password 
 }
 
 export function updateTeacherOrg(teacherId, nextOrgId, actor = null) {
-  if (!isOwnerTeacher(actor)) return { ok: false, error: 'เฉพาะ Wich Pitchon เท่านั้นที่ย้ายหน่วยงานครูได้' };
+  if (!isOwnerTeacher(actor) && !canManageOrganizations(actor)) return { ok: false, error: 'เฉพาะ Wich หรือหน่วยงานหลักเท่านั้นที่ย้ายหน่วยงานครูได้' };
   const db = getDB();
   const teacher = db.teachers.find(t => t.id === teacherId && !t.deletedAt);
   if (!teacher) return { ok: false, error: 'ไม่พบบัญชีครู' };
   if (teacher.isOwner) return { ok: false, error: 'ไม่สามารถย้ายหน่วยงานเจ้าของระบบได้' };
+  if (!isOwnerTeacher(actor) && teacher.id === actor.teacherId) return { ok: false, error: 'ไม่สามารถย้ายหน่วยงานของตนเองได้' };
   const org = findOrganization(nextOrgId, db);
   if (!org) return { ok: false, error: 'ไม่พบหน่วยงานปลายทาง' };
   teacher.orgId = org.id;
   teacher.school = org.name;
   db.exams.forEach(exam => {
-    if (exam.teacherId === teacher.id) {
+    if (exam.teacherId !== teacher.id) return;
+    const ids = examOrganizationIds(exam, db);
+    if (ids.length <= 1) {
       exam.orgId = org.id;
-      exam.teacherSchool = org.name;
+      exam.orgIds = [org.id];
     }
+    exam.teacherSchool = org.name;
   });
   saveDB();
   return { ok: true, teacher, organization: org };
@@ -1214,11 +1258,14 @@ export function removeTeacher(teacherId, actor = null) {
   if (actor?.role === 'teacher' && actor.teacherId === teacher.id) return { ok: false, error: 'ไม่สามารถลบบัญชีของตนเองได้' };
   const owner = isOwnerTeacher(actor);
   const manager = isManagerStaff(actor);
-  if (!owner && !manager) return { ok: false, error: 'คุณไม่มีสิทธิ์ลบบัญชีนี้' };
-  if (manager) {
-    const me = currentTeacher(actor);
-    if (!me || teacher.orgId !== me.orgId) return { ok: false, error: 'ผู้จัดการลบบัญชีได้เฉพาะในหน่วยงานของตนเอง' };
-    if (teacher.staffRole !== 'teacher') return { ok: false, error: 'ผู้จัดการลบได้เฉพาะบัญชีครูผู้สอน' };
+  const globalManager = canManageOrganizations(actor);
+  if (!owner && !manager && !globalManager) return { ok: false, error: 'คุณไม่มีสิทธิ์ลบบัญชีนี้' };
+  if (!owner) {
+    if (manager) {
+      const me = currentTeacher(actor);
+      if (!me || teacher.orgId !== me.orgId) return { ok: false, error: 'ผู้จัดการลบบัญชีได้เฉพาะในหน่วยงานของตนเอง' };
+    }
+    if (teacher.staffRole !== 'teacher') return { ok: false, error: 'ลบได้เฉพาะบัญชีครูผู้สอน' };
   }
   teacher.deletedAt = new Date().toISOString();
   teacher.deletedBy = actor.teacherId;
@@ -1289,7 +1336,7 @@ export function addStudent({ name, code, classId, classIds, className, orgId, pa
   const actorTeacher = currentTeacher(actor);
   if (!actorTeacher) return { ok: false, error: 'ต้องเข้าสู่ระบบด้วยบัญชีครูจึงเพิ่มนักเรียนได้' };
   const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
-  const owner = isOwnerTeacher(actor);
+  const owner = hasAllOrganizationAccess(actor, db);
   let org = owner ? findOrganization(orgId, db) : findOrganization(actorTeacher.orgId, db);
   if (!org) org = findOrganization(actorTeacher.orgId, db) || (db.organizations || [])[0];
   if (!org) return { ok: false, error: 'ไม่พบหน่วยงานหรือโรงเรียน' };
@@ -1405,8 +1452,8 @@ export function deleteClass(classId, actor = null) {
   return { ok: true, code: cls.code };
 }
 
-export function addOrganization({ name, shortName, type = 'school' } = {}, actor = null) {
-  if (!isOwnerTeacher(actor)) return { ok: false, error: 'เฉพาะ Wich Pitchon เท่านั้นที่สร้างหน่วยงานได้' };
+export function addOrganization({ name, shortName, type = 'school', accessLevel = 'own' } = {}, actor = null) {
+  if (!canManageOrganizations(actor)) return { ok: false, error: 'เฉพาะ Wich หรือหน่วยงานหลักที่มีสิทธิ์จัดการองค์กรเท่านั้นที่สร้างหน่วยงานได้' };
   const db = getDB();
   const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
   const short = normalizeOrgShort(shortName);
@@ -1423,6 +1470,7 @@ export function addOrganization({ name, shortName, type = 'school' } = {}, actor
     name: cleanName,
     shortName: short,
     type: type === 'agency' ? 'agency' : 'school',
+    accessLevel: ['view_all', 'manage_all'].includes(accessLevel) ? accessLevel : 'own',
     createdBy: actor.teacherId,
     createdAt: new Date().toISOString()
   };
@@ -1431,8 +1479,8 @@ export function addOrganization({ name, shortName, type = 'school' } = {}, actor
   return { ok: true, organization: org };
 }
 
-export function updateOrganization(orgId, { name, shortName, type } = {}, actor = null) {
-  if (!isOwnerTeacher(actor)) return { ok: false, error: 'เฉพาะ Wich Pitchon เท่านั้นที่แก้ไขหน่วยงานได้' };
+export function updateOrganization(orgId, { name, shortName, type, accessLevel } = {}, actor = null) {
+  if (!canManageOrganizations(actor)) return { ok: false, error: 'เฉพาะ Wich หรือหน่วยงานหลักที่มีสิทธิ์จัดการองค์กรเท่านั้นที่แก้ไขหน่วยงานได้' };
   const db = getDB();
   const org = db.organizations.find(o => o.id === orgId);
   if (!org) return { ok: false, error: 'ไม่พบหน่วยงานนี้' };
@@ -1446,9 +1494,17 @@ export function updateOrganization(orgId, { name, shortName, type } = {}, actor 
   if (db.organizations.some(o => o.id !== orgId && normalizeOrgShort(o.shortName) === short)) {
     return { ok: false, error: 'ชื่อย่อนี้ถูกใช้งานแล้ว' };
   }
+  const nextAccess = accessLevel === undefined
+    ? organizationAccessLevel(org)
+    : (['view_all', 'manage_all'].includes(accessLevel) ? accessLevel : 'own');
+  const me = currentTeacher(actor);
+  if (!isOwnerTeacher(actor) && me?.orgId === org.id && nextAccess !== organizationAccessLevel(org)) {
+    return { ok: false, error: 'ไม่สามารถเปลี่ยนสิทธิ์การมองเห็นของหน่วยงานที่คุณสังกัดเองได้ กรุณาให้ Wich เปลี่ยนให้' };
+  }
   org.name = cleanName;
   org.shortName = short;
   org.type = type === 'agency' ? 'agency' : type === 'school' ? 'school' : org.type;
+  org.accessLevel = nextAccess;
   db.teachers.forEach(t => {
     if (t.orgId === orgId) t.school = org.name;
   });
@@ -1461,11 +1517,15 @@ export function updateOrganization(orgId, { name, shortName, type } = {}, actor 
 }
 
 export function deleteOrganization(orgId, actor = null) {
-  if (!isOwnerTeacher(actor)) return { ok: false, error: 'เฉพาะ Wich Pitchon เท่านั้นที่ลบหน่วยงานได้' };
+  if (!canManageOrganizations(actor)) return { ok: false, error: 'เฉพาะ Wich หรือหน่วยงานหลักที่มีสิทธิ์จัดการองค์กรเท่านั้นที่ลบหน่วยงานได้' };
   const db = getDB();
   const org = db.organizations.find(o => o.id === orgId);
   if (!org) return { ok: false, error: 'ไม่พบหน่วยงานนี้' };
   if (db.organizations.length <= 1) return { ok: false, error: 'ต้องมีหน่วยงานอย่างน้อย 1 แห่งในระบบ' };
+  const me = currentTeacher(actor);
+  if (!isOwnerTeacher(actor) && me?.orgId === orgId) {
+    return { ok: false, error: 'ไม่สามารถลบหน่วยงานที่คุณสังกัดเองได้' };
+  }
   const owner = db.teachers.find(t => t.isOwner && !t.deletedAt);
   if (owner?.orgId === orgId) {
     return { ok: false, error: 'ลบหน่วยงานที่ Wich สังกัดอยู่ไม่ได้ กรุณาย้าย Wich ไปหน่วยงานอื่นก่อน' };
@@ -1473,11 +1533,11 @@ export function deleteOrganization(orgId, actor = null) {
   const teachers = db.teachers.filter(t => t.orgId === orgId);
   const classes = db.classes.filter(c => c.orgId === orgId);
   const students = db.students.filter(st => st.orgId === orgId);
-  const exams = db.exams.filter(exam => examOrganizationId(exam, db) === orgId);
+  const exams = db.exams.filter(exam => examOrganizationIds(exam, db).includes(orgId));
   const teacherIds = new Set(teachers.map(t => t.id));
   const studentIds = new Set(students.map(st => st.id));
-  const examIds = new Set(exams.map(exam => exam.id));
-  const attempts = db.attempts.filter(a => examIds.has(a.examId) || studentIds.has(a.studentId));
+  const removedExamIds = new Set();
+  const attempts = db.attempts.filter(a => exams.some(exam => exam.id === a.examId) || studentIds.has(a.studentId));
   if (teachers.some(t => t.isOwner)) {
     return { ok: false, error: 'หน่วยงานนี้มีบัญชีเจ้าของระบบอยู่ ไม่สามารถลบได้' };
   }
@@ -1485,13 +1545,25 @@ export function deleteOrganization(orgId, actor = null) {
   db.teachers = db.teachers.filter(t => t.orgId !== orgId);
   db.classes = db.classes.filter(c => c.orgId !== orgId);
   db.students = db.students.filter(st => st.orgId !== orgId);
-  db.exams = db.exams.filter(exam => !examIds.has(exam.id));
-  db.attempts = db.attempts.filter(a => !examIds.has(a.examId) && !studentIds.has(a.studentId));
+  db.exams = db.exams.flatMap(exam => {
+    const ids = examOrganizationIds(exam, db);
+    if (!ids.includes(orgId)) return [exam];
+    const nextIds = ids.filter(id => id !== orgId);
+    if (!nextIds.length) {
+      removedExamIds.add(exam.id);
+      return [];
+    }
+    exam.orgIds = nextIds;
+    exam.orgId = nextIds[0];
+    exam.assignedStudentIds = (exam.assignedStudentIds || []).filter(id => !studentIds.has(id));
+    return [exam];
+  });
+  db.attempts = db.attempts.filter(a => !removedExamIds.has(a.examId) && !studentIds.has(a.studentId));
   db.notices = (db.notices || []).filter(notice => {
     const [kind, id] = String(notice.target || '').split(':');
     if (kind === 'student' && (id === 'all' || !studentIds.has(id))) return true;
     if (kind === 'teacher') return !teacherIds.has(id);
-    if (kind === 'exam') return !examIds.has(id);
+    if (kind === 'exam') return !removedExamIds.has(id);
     return true;
   });
   if (db.noticeReads && typeof db.noticeReads === 'object') {
@@ -1505,7 +1577,7 @@ export function deleteOrganization(orgId, actor = null) {
       teachers: teachers.length,
       classes: classes.length,
       students: students.length,
-      exams: exams.length,
+      exams: removedExamIds.size,
       attempts: attempts.length
     }
   };
@@ -1542,7 +1614,7 @@ export function setTeacherCode(teacherId, nextCode, actor = null) {
   if (!teacher) return { ok: false, error: 'ไม่พบบัญชีครู' };
   if (teacher.isOwner) return { ok: false, error: 'รหัสของ Wich Pitchon ถูกป้องกันและแก้ไขไม่ได้' };
   const me = currentTeacher(actor);
-  const allowed = isOwnerTeacher(actor)
+  const allowed = isOwnerTeacher(actor) || canManageOrganizations(actor)
     || Boolean(me && isManagerStaff(actor) && me.orgId === teacher.orgId
       && (teacher.staffRole !== 'manager' || teacher.id === me.id));
   if (!allowed) return { ok: false, error: 'คุณไม่มีสิทธิ์แก้รหัสครูบัญชีนี้' };
@@ -1566,7 +1638,7 @@ export function setStudentCode(studentId, nextCode, actor = null) {
   const student = db.students.find(st => st.id === studentId);
   if (!student) return { ok: false, error: 'ไม่พบบัญชีนักเรียน' };
   const me = currentTeacher(actor);
-  const allowed = isOwnerTeacher(actor)
+  const allowed = isOwnerTeacher(actor) || canManageOrganizations(actor)
     || Boolean(me && isManagerStaff(actor) && me.orgId === student.orgId);
   if (!allowed) return { ok: false, error: 'คุณไม่มีสิทธิ์แก้รหัสนักเรียนคนนี้' };
   const code = String(nextCode || '').trim().toUpperCase();
@@ -1590,6 +1662,7 @@ export function setStudentPassword(studentId, nextPassword, actor = null) {
   const me = currentTeacher(actor);
   const allowed = (actor?.role === 'student' && actor.studentId === studentId)
     || isOwnerTeacher(actor)
+    || hasAllOrganizationAccess(actor)
     || Boolean(me && !isManagerStaff(actor) && me.orgId === student.orgId);
   if (!allowed) return { ok: false, error: 'คุณไม่มีสิทธิ์เปลี่ยนรหัสผ่านของนักเรียนคนนี้' };
   const password = String(nextPassword || '');
@@ -1600,7 +1673,7 @@ export function setStudentPassword(studentId, nextPassword, actor = null) {
 }
 
 export function updateStudentOrg(studentId, nextOrgId, actor = null) {
-  if (!isOwnerTeacher(actor)) return { ok: false, error: 'เฉพาะ Wich Pitchon เท่านั้นที่ย้ายหน่วยงานนักเรียนได้' };
+  if (!isOwnerTeacher(actor) && !canManageOrganizations(actor)) return { ok: false, error: 'เฉพาะ Wich หรือหน่วยงานหลักเท่านั้นที่ย้ายหน่วยงานนักเรียนได้' };
   const db = getDB();
   const student = db.students.find(s => s.id === studentId);
   if (!student) return { ok: false, error: 'ไม่พบนักเรียน' };
@@ -1634,7 +1707,7 @@ export function setStudentClasses(studentId, nextClassIds = []) {
 }
 
 export function removeStudent(studentId, actor = null) {
-  if (!isOwnerTeacher(actor)) return { ok: false, error: 'เฉพาะ Wich Pitchon เท่านั้นที่ลบรายชื่อนักเรียนได้' };
+  if (!isOwnerTeacher(actor) && !canManageOrganizations(actor)) return { ok: false, error: 'เฉพาะ Wich หรือหน่วยงานหลักเท่านั้นที่ลบรายชื่อนักเรียนได้' };
   const db = getDB();
   const student = db.students.find(s => s.id === studentId);
   if (!student) return { ok: false, error: 'ไม่พบรายชื่อนักเรียน' };

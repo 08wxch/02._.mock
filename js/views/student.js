@@ -18,7 +18,7 @@ import {
 } from '../store.js';
 import { cloudLogout } from '../cloud.js';
 import { mathText } from '../math.js';
-import { questionImageHTML } from '../questionMedia.js';
+import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { navigate, refreshRoute } from '../router.js';
 import { openAccountProfile } from '../profile.js';
 
@@ -568,9 +568,9 @@ function questionMarkup(exam, attempt, idx) {
     answerArea = `<div class="answer-options" role="group" aria-label="ตัวเลือกคำตอบ">
       ${q.options.map(option => {
         const active = String(value) === String(option.id);
-        return `<button type="button" class="answer-option ${active ? 'is-selected' : ''}" data-option="${e(option.id)}" aria-pressed="${active}">
+        return `<button type="button" class="answer-option ${active ? 'is-selected' : ''} ${option.image ? 'answer-option--has-image' : ''}" data-option="${e(option.id)}" aria-pressed="${active}">
           <span class="answer-option__key">${e(option.id)}</span>
-          <span class="answer-option__text">${mathText(option.text)}</span>
+          <span class="answer-option__text">${option.text.trim() ? mathText(option.text) : ''}${optionImageHTML(option, 'answer-option__image')}</span>
           <span class="answer-option__check">${icon('check-circle', 16)}<span>เลือกแล้ว</span></span>
         </button>`;
       }).join('')}
@@ -1131,8 +1131,8 @@ export function resultView(ctx) {
     const detail = showSolutions ? `<div class="review-detail">
       <div class="review-detail__q">${mathText(q.text)}</div>
       ${questionImageHTML(q, 'question-figure question-figure--review')}
-      <div class="answer-line"><span>คำตอบของคุณ</span><strong>${mathText(answerText(q, value))}</strong></div>
-      ${status !== 'correct' && q.type !== 'essay' ? `<div class="answer-line answer-line--solution"><span>คำตอบที่ถูก</span><strong>${mathText(correctAnswerText(q))}</strong></div>` : ''}
+      <div class="answer-line"><span>คำตอบของคุณ</span><strong>${mathText(answerText(q, value))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(value)) : null, 'answer-line__option-image')}</div>
+      ${status !== 'correct' && q.type !== 'essay' ? `<div class="answer-line answer-line--solution"><span>คำตอบที่ถูก</span><strong>${mathText(correctAnswerText(q))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(q.correct)) : null, 'answer-line__option-image')}</div>` : ''}
       ${q.type === 'essay' ? `<div class="answer-line answer-line--solution"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—')}</strong></div>` : ''}
       ${q.type === 'essay' && manual?.comment ? `<div class="teacher-comment"><strong>${icon('message-circle', 12)} ความคิดเห็นจากครู</strong>${e(manual.comment)}</div>` : ''}
       ${q.explanation ? `<div class="answer-explanation">${icon('info', 13)}<span>${mathText(q.explanation)}</span></div>` : ''}

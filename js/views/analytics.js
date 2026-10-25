@@ -4,7 +4,8 @@ import { avatar, badge, emptyState } from '../ui.js';
 import {
   getDB, currentTeacher, isOwnerTeacher, visibleStudents,
   visibleExams, canViewExamStats, classIdsOf, studentClassLabel,
-  attemptScore, examOrganizationId, findOrganization
+  attemptScore, examOrganizationId, examOrganizationIds, findOrganization,
+  hasAllOrganizationAccess
 } from '../store.js';
 import { navigate } from '../router.js';
 import { teacherShell, mountTeacherShell } from './teacher.js';
@@ -16,7 +17,7 @@ function queryValue(ctx, key) {
 function scopeFor(ctx) {
   const { session } = ctx;
   const db = getDB();
-  const owner = isOwnerTeacher(session);
+  const owner = hasAllOrganizationAccess(session);
   const me = currentTeacher(session);
   if (!me) return { denied: true };
 
@@ -36,7 +37,7 @@ function scopeFor(ctx) {
   const studentIds = new Set(students.map(student => student.id));
 
   const exams = visibleExams(session, db).filter(exam =>
-    orgIds.has(examOrganizationId(exam, db)) && canViewExamStats(exam, session)
+    examOrganizationIds(exam, db).some(id => orgIds.has(id)) && canViewExamStats(exam, session)
   );
   const examById = new Map(exams.map(exam => [exam.id, exam]));
   const attempts = db.attempts.filter(attempt =>
