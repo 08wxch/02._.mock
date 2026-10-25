@@ -28,6 +28,7 @@ import {
 } from '../store.js';
 import { cloudLogout } from '../cloud.js';
 import { mathText } from '../math.js';
+import { questionImageHTML } from '../questionMedia.js';
 import { navigate, refreshRoute } from '../router.js';
 import { openAccountProfile } from '../profile.js';
 
@@ -659,6 +660,7 @@ function gradingTab(exam, metrics) {
     }).join('');
     return `<section class="grading-section" data-grade-section="${q.id}">
       <div class="grading-section__head"><h3>${icon('edit', 14)} ข้อ ${qIndex} · ${mathText(q.text)} <span>${submissions.length} คำตอบ</span></h3><span class="badge badge--neutral">${q.points} คะแนน</span></div>
+      ${questionImageHTML(q, 'question-figure question-figure--grading')}
       <div class="grading-list">${entries || `<div class="teacher-card">${emptyState({ iconName: 'inbox', title: 'ยังไม่มีคำตอบให้ตรวจ', text: 'เมื่อนักเรียนส่งคำตอบแล้ว จะแสดงที่นี่' })}</div>`}</div>
     </section>`;
   }).join('');
@@ -1119,6 +1121,7 @@ export function teacherAnswerView(ctx) {
         <span class="answer-review-card__status answer-review-card__status--${statusClass}">${icon(statusClass === 'correct' ? 'check-circle' : statusClass === 'wrong' ? 'x-circle' : 'clock', 13)} ${statusText}</span>
       </div>
       <div class="answer-review-card__body">
+        ${questionImageHTML(q, 'answer-review-card__image')}
         ${q.type === 'essay'
           ? `<div class="answer-review-essay ${value ? '' : 'is-empty'}">${value ? e(value) : 'นักเรียนไม่ได้เขียนคำตอบ'}</div>
              <div class="answer-review-line"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—')}</strong></div>
@@ -2542,6 +2545,7 @@ export function teacherStudentExamView(ctx) {
     return `<div class="student-answer-row ${correct === true ? 'is-correct' : correct === false ? 'is-wrong' : ''}">
       <div class="student-answer-row__head"><span>ข้อ ${index + 1}</span><span>${typeLabel(q.type)} · ${q.points} คะแนน</span><strong>${points} คะแนน</strong></div>
       <div class="student-answer-row__question">${mathText(q.text)}</div>
+      ${questionImageHTML(q, 'question-figure question-figure--review')}
       <div class="student-answer-row__grid">
         <div><span>คำตอบของนักเรียน</span><strong>${value === null || value === undefined || value === '' ? '— ไม่ได้ตอบ —' : mathText(answerText(q, value))}</strong></div>
         <div><span>${q.type === 'essay' ? 'แนวคำตอบ' : 'คำตอบที่ถูก'}</span><strong>${mathText(correctAnswerText(q))}</strong></div>

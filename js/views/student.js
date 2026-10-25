@@ -18,6 +18,7 @@ import {
 } from '../store.js';
 import { cloudLogout } from '../cloud.js';
 import { mathText } from '../math.js';
+import { questionImageHTML } from '../questionMedia.js';
 import { navigate, refreshRoute } from '../router.js';
 import { openAccountProfile } from '../profile.js';
 
@@ -605,6 +606,7 @@ function questionMarkup(exam, attempt, idx) {
     </div>
     <div class="question-body">
       <h2 class="question-text">${mathText(q.text)}</h2>
+      ${questionImageHTML(q)}
       <div class="question-points">${icon('award', 12)} ${q.points} คะแนน · ${typeHint(q.type)}</div>
       ${answerArea}
     </div>
@@ -1128,6 +1130,7 @@ export function resultView(ctx) {
     const iconName = status === 'correct' ? 'check' : status === 'wrong' ? 'x' : 'clock';
     const detail = showSolutions ? `<div class="review-detail">
       <div class="review-detail__q">${mathText(q.text)}</div>
+      ${questionImageHTML(q, 'question-figure question-figure--review')}
       <div class="answer-line"><span>คำตอบของคุณ</span><strong>${mathText(answerText(q, value))}</strong></div>
       ${status !== 'correct' && q.type !== 'essay' ? `<div class="answer-line answer-line--solution"><span>คำตอบที่ถูก</span><strong>${mathText(correctAnswerText(q))}</strong></div>` : ''}
       ${q.type === 'essay' ? `<div class="answer-line answer-line--solution"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—')}</strong></div>` : ''}

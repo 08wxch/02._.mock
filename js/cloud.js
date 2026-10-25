@@ -424,6 +424,46 @@ export async function cloudGetPassword(role, id) {
   }
 }
 
+const QUESTION_IMAGE_BUCKET = 'question-images';
+
+function imageExtension(type) {
+  if (type === 'image/png') return 'png';
+  if (type === 'image/jpeg') return 'jpg';
+  return 'webp';
+}
+
+export async function cloudUploadQuestionImage(blob) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  if (current.role !== 'teacher') return { ok: false, error: 'เฉพาะครูเท่านั้นที่อัปโหลดภาพโจทย์ได้' };
+  if (!blob || !blob.size) return { ok: false, error: 'ไม่พบไฟล์รูปภาพ' };
+  if (blob.size > 5 * 1024 * 1024) return { ok: false, error: 'รูปภาพต้องมีขนาดไม่เกิน 5 MB' };
+  const type = blob.type || 'image/jpeg';
+  const path = `questions/${String(current.teacherId || 'teacher').replace(/[^A-Za-z0-9_-]/g, '')}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${imageExtension(type)}`;
+  try {
+    const supa = getClient();
+    const { error } = await supa.storage.from(QUESTION_IMAGE_BUCKET).upload(path, blob, {
+      contentType: type,
+      cacheControl: '31536000',
+      upsert: false
+    });
+    if (error) throw error;
+    const { data } = supa.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(path);
+    return { ok: true, url: data.publicUrl, path };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'อัปโหลดรูปภาพไม่สำเร็จ' };
+  }
+}
+
+export async function cloudDeleteQuestionImage(path) {
+  if (!ready || !current || current.role !== 'teacher' || !path) return;
+  try {
+    const supa = getClient();
+    await supa.storage.from(QUESTION_IMAGE_BUCKET).remove([path]);
+  } catch (err) {
+    console.warn('Could not remove question image', err);
+  }
+}
+
 export async function cloudSetPassword(role, id, password) {
   if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
   const next = String(password || '');

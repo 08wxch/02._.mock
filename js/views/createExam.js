@@ -3,6 +3,8 @@ import { e, uid } from '../utils.js';
 import { toast, emptyState, confirmDialog } from '../ui.js';
 import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, isOwnerTeacher, findOrganization, examOrganizationId, examOrganizationName } from '../store.js';
 import { mathText } from '../math.js';
+import { questionImageHTML } from '../questionMedia.js';
+import { cloudUploadQuestionImage } from '../cloud.js';
 import { navigate } from '../router.js';
 import { teacherShell, mountTeacherShell } from './teacher.js';
 
@@ -33,7 +35,9 @@ function blankQuestion(type = 'mcq') {
     options: defaultOptions(),
     correct: type === 'truefalse' ? 'true' : 'A',
     acceptedAnswers: '',
-    reference: ''
+    reference: '',
+    image: '',
+    imagePath: ''
   };
 }
 
@@ -87,7 +91,9 @@ function examToDraft(exam) {
         : defaultOptions(),
       correct: q.type === 'truefalse' ? String(q.correct ?? 'true') : (q.correct || 'A'),
       acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.join(', ') : (q.acceptedAnswers || ''),
-      reference: q.reference || q.explanation || ''
+      reference: q.reference || q.explanation || '',
+      image: q.image || '',
+      imagePath: q.imagePath || ''
     }))
   };
 }
@@ -135,6 +141,20 @@ function questionEditor(q, index, total) {
       <div class="field">
         <div class="field__label-row"><label>โจทย์ / คำถาม</label><span class="math-badge">LaTeX</span></div>
         <textarea class="textarea" placeholder="พิมพ์คำถามข้อ ${index + 1}... เช่น จงแก้สมการ $x^2 - 5x + 6 = 0$" data-q-text>${e(q.text)}</textarea>
+      </div>
+      <div class="qb-media" data-q-media>
+        <div class="field__label-row"><label>ภาพประกอบโจทย์ <span class="muted">(ไม่บังคับ)</span></label><span class="qb-media__format">PNG · JPG · WebP</span></div>
+        ${q.image ? `<div class="qb-image-preview">
+          <img src="${e(q.image)}" alt="ภาพประกอบโจทย์ข้อ ${index + 1}" loading="lazy">
+          <button class="btn btn--danger-ghost btn--sm" type="button" data-remove-q-image="${q.id}">${icon('trash', 12)} ลบรูป</button>
+        </div>` : ''}
+        <label class="qb-image-upload">
+          <input type="file" accept="image/png,image/jpeg,image/webp" data-q-image-input="${q.id}">
+          ${icon('image', 15)}
+          <span>${q.image ? 'เปลี่ยนรูปภาพ' : 'อัปโหลดรูปภาพประกอบ'}</span>
+          <small data-image-status>${q.image ? 'อัปโหลดใหม่เพื่อแทนที่รูปเดิม' : 'ขนาดไม่เกิน 5 MB · ระบบย่อขนาดให้อัตโนมัติ'}</small>
+        </label>
+        <div class="qb-helper">${icon('info', 11)} ใช้ภาพจาก TikZ ได้โดย export เป็น PNG แล้วอัปโหลด · ระบบแสดงผลภาพในโจทย์ ตัวอย่างข้อสอบ และหน้าตรวจ</div>
       </div>
       ${body}
     </div>
@@ -312,6 +332,7 @@ function previewHTML(question, index) {
   }
   return `<div class="live-preview__meta">ข้อ ${index + 1} · ${question.points} คะแนน</div>
     <div class="live-preview__question">${text}</div>
+    ${questionImageHTML(question, 'live-preview__image')}
     ${body}`;
 }
 
@@ -380,9 +401,81 @@ function serializeQuestions() {
       correct: q.type === 'short' ? (accepted[0] || '') : q.correct,
       acceptedAnswers: accepted,
       reference: q.type === 'essay' ? q.reference.trim() : undefined,
-      explanation: q.type === 'essay' ? q.reference.trim() : ''
+      explanation: q.type === 'essay' ? q.reference.trim() : '',
+      image: String(q.image || '').trim(),
+      imagePath: String(q.imagePath || '').trim()
     };
   });
+}
+
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const MAX_IMAGE_INPUT = 12 * 1024 * 1024;
+
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('เปิดไฟล์รูปภาพไม่ได้')); };
+    img.src = url;
+  });
+}
+
+async function prepareQuestionImage(file) {
+  if (!IMAGE_TYPES.has(file.type)) throw new Error('รองรับเฉพาะ PNG, JPG หรือ WebP');
+  if (file.size > MAX_IMAGE_INPUT) throw new Error('รูปต้นฉบับต้องมีขนาดไม่เกิน 12 MB');
+  const img = await loadImageFile(file);
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  const maxSide = 1800;
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  if (scale === 1 && file.size <= 1.2 * 1024 * 1024) return file;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const toBlob = type => new Promise(resolve => canvas.toBlob(resolve, type, 0.86));
+  let blob = await toBlob('image/webp');
+  if (!blob) blob = await toBlob('image/jpeg');
+  if (!blob) throw new Error('ย่อขนาดรูปภาพไม่สำเร็จ');
+  if (blob.size > 5 * 1024 * 1024) throw new Error('รูปหลังย่อขนาดใหญ่เกิน 5 MB');
+  return blob;
+}
+
+async function handleQuestionImage(root, input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const card = input.closest('[data-question-builder]');
+  const id = card?.dataset.questionBuilder;
+  if (!id) return;
+  syncDraft(root);
+  const question = draft.questions.find(q => q.id === id);
+  if (!question) return;
+  const status = card.querySelector('[data-image-status]');
+  const label = input.closest('.qb-image-upload');
+  input.disabled = true;
+  label?.classList.add('is-uploading');
+  if (status) status.textContent = 'กำลังย่อและอัปโหลดรูป...';
+  try {
+    const prepared = await prepareQuestionImage(file);
+    const uploaded = await cloudUploadQuestionImage(prepared);
+    if (!uploaded.ok) throw new Error(uploaded.error || 'อัปโหลดรูปไม่สำเร็จ');
+    question.image = uploaded.url;
+    question.imagePath = uploaded.path;
+    draft.activeQuestionId = question.id;
+    renderQuestions(root);
+    updateSummary(root);
+    toast('เพิ่มภาพประกอบโจทย์แล้ว', 'success');
+  } catch (err) {
+    if (status) status.textContent = err?.message || 'อัปโหลดรูปไม่สำเร็จ';
+    input.disabled = false;
+    input.value = '';
+    label?.classList.remove('is-uploading');
+    toast(err?.message || 'อัปโหลดรูปไม่สำเร็จ', 'error', 6000);
+  }
 }
 
 function sampleDraft() {
@@ -514,7 +607,7 @@ export function createExamView(ctx) {
         </section>
         <section class="form-card">
           <div class="form-card__head">
-            <div><h2>คำถาม</h2><p>เพิ่มได้ทั้งปรนัย ถูก/ผิด เติมคำ และอัตนัย พร้อมรองรับสมการ LaTeX</p></div>
+            <div><h2>คำถาม</h2><p>เพิ่มได้ทั้งปรนัย ถูก/ผิด เติมคำ และอัตนัย · รองรับสมการ LaTeX และภาพประกอบรายข้อ</p></div>
             <div class="form-card__head-tools"><span class="math-badge">$...$ / $$...$$</span><span class="form-card__step">4</span></div>
           </div>
           <div class="builder-questions" data-questions>${questionsHTML()}</div>
@@ -551,6 +644,7 @@ export function createExamView(ctx) {
           <div class="math-help">
             <strong>พิมพ์สมการในโจทย์และตัวเลือกได้</strong>
             <span><code>$x^2$</code> ในบรรทัด · <code>$$\\frac{a}{b}$$</code> แบบบล็อก</span>
+            <span>TikZ ไม่ render โดยตรง — export เป็น PNG แล้วอัปโหลดในช่องภาพประกอบ</span>
           </div>
         </div>
         ${hasAttempts ? `<div class="create-note create-note--warn">${icon('alert-triangle', 12)} ชุดสอบนี้มีผู้เข้าสอบแล้ว การแก้โจทย์หรือคะแนนอาจกระทบผลสอบย้อนหลัง</div>` : ''}
@@ -591,7 +685,12 @@ export function createExamView(ctx) {
           updatePreview(root);
         }
       });
-      form.addEventListener('change', ev => {
+      form.addEventListener('change', async ev => {
+        const imageInput = ev.target.closest('[data-q-image-input]');
+        if (imageInput) {
+          await handleQuestionImage(root, imageInput);
+          return;
+        }
         const orgSelect = ev.target.closest('[data-exam-org]');
         if (orgSelect) {
           syncDraft(root);
@@ -656,6 +755,18 @@ export function createExamView(ctx) {
         if (clear) {
           root.querySelectorAll('[data-participant-row]:not(.hidden) [data-participant]').forEach(box => { box.checked = false; });
           refresh();
+          return;
+        }
+        const removeImage = ev.target.closest('[data-remove-q-image]');
+        if (removeImage) {
+          syncDraft(root);
+          const imageQuestion = draft.questions.find(q => q.id === removeImage.dataset.removeQImage);
+          if (!imageQuestion) return;
+          imageQuestion.image = '';
+          imageQuestion.imagePath = '';
+          renderQuestions(root);
+          updateSummary(root);
+          toast('ลบภาพประกอบโจทย์แล้ว', 'info');
           return;
         }
         const add = ev.target.closest('[data-add-question]');
