@@ -14,7 +14,7 @@ import {
   getDB, findExam, participantRows, examMetrics, totalPendingReview,
   attemptScore, attemptStatusMeta, questionStats, scoreDistribution,
   rankAttempts, getNotifications, saveDB, addNotice, getExamAttempts,
-  pendingEssayQuestions, answerText, correctAnswerText, getAnswerValue,
+  pendingEssayQuestions, pendingReviewQuestions, answerText, correctAnswerText, getAnswerValue,
   isCorrect, clearSession, currentStudentKey, submitAttempt,
   addStudent, removeStudent, deleteExam, addClass, addClassAcrossOrganizations, renameClass, deleteClass,
   setStudentClasses, classIdsOf, classCodesOf, studentsInClass,
@@ -663,25 +663,42 @@ function studentsTab(exam, metrics) {
 }
 
 function gradingTab(exam, metrics) {
-  const essayQuestions = exam.questions.filter(q => q.type === 'essay');
+  const manualQuestions = exam.questions.filter(q => q.type === 'essay' || q.type === 'short');
   const submissions = getExamAttempts(exam.id)
     .filter(a => a.status !== 'in_progress')
     .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt));
-  const totalEssaySlots = submissions.length * essayQuestions.length;
-  const gradedSlots = submissions.reduce((sum, a) => sum + essayQuestions.filter(q => a.manualScores?.[q.id] !== undefined).length, 0);
-  const pendingSlots = totalEssaySlots - gradedSlots;
-  if (!essayQuestions.length) {
+  const needsManualEntry = (q, a) => {
+    if (q.type === 'essay') return true;
+    if (q.type !== 'short') return false;
+    const value = getAnswerValue(a, q.id);
+    return String(value ?? '').trim() !== '' && !isCorrect(q, value);
+  };
+  const sectionsData = manualQuestions
+    .map(q => ({ q, entries: submissions.filter(a => needsManualEntry(q, a)) }))
+    .filter(section => section.entries.length > 0);
+  const totalSlots = sectionsData.reduce((sum, section) => sum + section.entries.length, 0);
+  const gradedSlots = sectionsData.reduce((sum, section) => sum + section.entries.filter(a => a.manualScores?.[section.q.id] !== undefined).length, 0);
+  const pendingSlots = totalSlots - gradedSlots;
+  if (!manualQuestions.length) {
     return `<div class="teacher-card">${emptyState({
       iconName: 'check-circle',
       title: 'ชุดสอบนี้ตรวจอัตโนมัติทั้งหมด',
-      text: 'ไม่มีข้ออัตนัยที่ต้องตรวจด้วยมือ คะแนนถูกคำนวณให้เรียบร้อยแล้ว',
+      text: 'ไม่มีข้ออัตนัยหรือเติมคำที่ต้องตรวจด้วยมือ คะแนนถูกคำนวณให้เรียบร้อยแล้ว',
+      action: `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/stats">${icon('chart', 15)} ดูสถิติผลสอบ</a>`
+    })}</div>`;
+  }
+  if (!sectionsData.length) {
+    return `<div class="teacher-card">${emptyState({
+      iconName: 'check-circle',
+      title: 'ยังไม่มีคำตอบที่ต้องตรวจด้วยมือ',
+      text: 'ข้อเติมคำที่ตรงกับคำตอบที่กำหนดถูกตรวจอัตโนมัติแล้ว · ข้อที่พิมพ์ผิดจะมาแสดงที่นี่',
       action: `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/stats">${icon('chart', 15)} ดูสถิติผลสอบ</a>`
     })}</div>`;
   }
 
-  const sections = essayQuestions.map((q, qi) => {
+  const sections = sectionsData.map(({ q, entries }) => {
     const qIndex = exam.questions.findIndex(x => x.id === q.id) + 1;
-    const entries = submissions.map(a => {
+    const entryCards = entries.map(a => {
       const manual = a.manualScores?.[q.id];
       const value = getAnswerValue(a, q.id);
       return `<article class="grading-entry ${manual ? 'is-graded' : ''}" data-grade-status="${manual ? 'graded' : 'pending'}" data-attempt-id="${a.id}" data-question-id="${q.id}">
@@ -696,6 +713,7 @@ function gradingTab(exam, metrics) {
           </div>
         </div>
         <div class="student-answer-quote ${value ? '' : 'is-empty'}"><p>${value ? e(value) : 'นักเรียนไม่ได้เขียนคำตอบ'}</p></div>
+        ${q.type === 'short' ? `<div class="grading-entry__answer-key">${icon('key', 12)} <span>คำตอบที่ยอมรับ:</span><strong>${mathText([...new Set([q.correct, ...(q.acceptedAnswers || [])].filter(Boolean).map(String))].join(' หรือ ') || '—', { inlineDisplay: true })}</strong></div>` : ''}
         <div class="grading-form">
           <div class="field grading-score-field">
             <label>คะแนน / ${q.points}</label>
@@ -707,29 +725,29 @@ function gradingTab(exam, metrics) {
           </div>
           <button class="btn btn--primary" type="button" data-save-grade>${icon('save', 13)} บันทึกคะแนน</button>
         </div>
-        ${manual ? `<div class="grading-saved">${icon('check-circle', 13)} บันทึกเมื่อ ${thaiDateTime(manual.gradedAt)} · <strong>${manual.score}/${q.points} คะแนน</strong></div>` : ''}
+        ${manual ? `<div class="grading-saved">${icon('check-circle', 13)} บันทึกเมื่อ ${thaiDateTime(manual.gradedAt)} · <strong>${manual.score}/${q.points} คะแนน</strong></div>` : `<div class="grading-hint">${icon('info', 11)} ข้อนี้ยังไม่ถูกตัดสินว่าผิด — ครูให้คะแนนเองได้</div>`}
       </article>`;
     }).join('');
     return `<section class="grading-section" data-grade-section="${q.id}">
-      <div class="grading-section__head"><h3>${icon('edit', 14)} ข้อ ${qIndex} · ${mathText(q.text)} <span>${submissions.length} คำตอบ</span></h3><span class="badge badge--neutral">${q.points} คะแนน</span></div>
+      <div class="grading-section__head"><h3>${icon('edit', 14)} ข้อ ${qIndex} · ${mathText(q.text)} <span>${entries.length} คำตอบ</span></h3><span class="badge badge--neutral">${q.points} คะแนน · ${typeLabel(q.type)}</span></div>
       ${questionImageHTML(q, 'question-figure question-figure--grading')}
-      <div class="grading-list">${entries || `<div class="teacher-card">${emptyState({ iconName: 'inbox', title: 'ยังไม่มีคำตอบให้ตรวจ', text: 'เมื่อนักเรียนส่งคำตอบแล้ว จะแสดงที่นี่' })}</div>`}</div>
+      <div class="grading-list">${entryCards}</div>
     </section>`;
   }).join('');
 
   return `<div class="grading-status-card">
     <span class="grading-status-card__icon">${icon('clipboard-check', 21)}</span>
     <div class="grading-status-card__copy">
-      <h2>${pendingSlots ? `มีคำตอบอัตนัยรอตรวจ ${pendingSlots} รายการ` : 'ตรวจข้ออัตนัยครบแล้ว'}</h2>
+      <h2>${pendingSlots ? `มีคำตอบรอตรวจ ${pendingSlots} รายการ` : 'ตรวจข้อเขียนและเติมคำครบแล้ว'}</h2>
       <p>${pendingSlots ? 'ให้คะแนนพร้อมความคิดเห็น แล้วกดบันทึกเพื่ออัปเดตผลของนักเรียนทันที' : 'คะแนนของนักเรียนทุกคนพร้อมสำหรับการประกาศผล'}</p>
     </div>
     <div class="grading-status-card__progress">
-      <span>${gradedSlots} / ${totalEssaySlots}</span>
-      <div class="progress-mini"><span style="width:${totalEssaySlots ? percent(gradedSlots, totalEssaySlots) : 100}%"></span></div>
+      <span>${gradedSlots} / ${totalSlots}</span>
+      <div class="progress-mini"><span style="width:${totalSlots ? percent(gradedSlots, totalSlots) : 100}%"></span></div>
     </div>
     <div class="chip-select" style="margin-left:8px">
       <button class="chip is-active" type="button" data-grade-filter="pending">ต้องตรวจ (${pendingSlots})</button>
-      <button class="chip" type="button" data-grade-filter="all">ทั้งหมด (${submissions.length})</button>
+      <button class="chip" type="button" data-grade-filter="all">ทั้งหมด (${totalSlots})</button>
     </div>
   </div>
   <div data-grading-sections>
@@ -1151,18 +1169,41 @@ export function teacherAnswerView(ctx) {
   const used = attempt.timeUsedSec || Math.max(1, Math.round((new Date(attempt.submittedAt) - new Date(attempt.startedAt)) / 1000));
   const antiCheat = attempt.antiCheat || [];
 
+  const pendingIds = new Set(pendingReviewQuestions(exam, attempt).map(q => q.id));
   const answerCards = exam.questions.map((q, i) => {
     const value = getAnswerValue(attempt, q.id);
     const manual = attempt.manualScores?.[q.id];
+    const isShort = q.type === 'short';
+    const shortPending = isShort && pendingIds.has(q.id);
+    const accepted = [...new Set([q.correct, ...(q.acceptedAnswers || [])].filter(Boolean).map(String))];
     let statusClass = 'wrong';
     let statusText = 'ตอบผิด';
     if (q.type === 'essay') {
       statusClass = manual ? 'correct' : 'pending';
       statusText = manual ? `ให้ ${formatNumber(manual.score, 1)}/${q.points}` : 'รอตรวจ';
+    } else if (isShort) {
+      if (shortPending) {
+        statusClass = 'pending';
+        statusText = 'รอตรวจคำตอบ';
+      } else if (manual) {
+        statusClass = Number(manual.score) > 0 ? 'correct' : 'wrong';
+        statusText = `ให้ ${formatNumber(manual.score, 1)}/${q.points}`;
+      } else if (isCorrect(q, value)) {
+        statusClass = 'correct';
+        statusText = 'ถูกต้อง';
+      }
     } else if (isCorrect(q, value)) {
       statusClass = 'correct';
       statusText = 'ถูกต้อง';
     }
+
+    const gradeForm = `<div class="grade-inline">
+      <div class="field score-input"><label>คะแนน / ${q.points}</label><input class="input" type="number" min="0" max="${q.points}" step="0.5" value="${manual ? manual.score : ''}" placeholder="0" data-detail-score="${q.id}"></div>
+      <div class="field"><label>ความคิดเห็น</label><input class="input" type="text" value="${e(manual?.comment || '')}" placeholder="ความคิดเห็นถึงนักเรียน" data-detail-comment="${q.id}"></div>
+      <button class="btn btn--primary" type="button" data-save-detail-grade="${q.id}">${icon('save', 12)} บันทึก</button>
+    </div>
+    ${manual ? `<div class="grading-saved" style="margin-top:7px">${icon('check-circle', 12)} ตรวจเมื่อ ${thaiTime(manual.gradedAt)} น.</div>` : `<div class="grading-hint">${icon('info', 11)} ระบบยังไม่ตัดสินว่าผิด — ครูสามารถให้คะแนนบางส่วนหรือ 0 ได้</div>`}`;
+
     return `<article class="answer-review-card answer-review-card--${statusClass}">
       <div class="answer-review-card__head">
         <span class="answer-review-card__num">${i + 1}</span>
@@ -1176,16 +1217,16 @@ export function teacherAnswerView(ctx) {
         ${questionImageHTML(q, 'answer-review-card__image')}
         ${q.type === 'essay'
           ? `<div class="answer-review-essay ${value ? '' : 'is-empty'}">${value ? e(value) : 'นักเรียนไม่ได้เขียนคำตอบ'}</div>
-             <div class="answer-review-line"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—')}</strong></div>
-             <div class="grade-inline">
-               <div class="field score-input"><label>คะแนน / ${q.points}</label><input class="input" type="number" min="0" max="${q.points}" step="0.5" value="${manual ? manual.score : ''}" placeholder="0" data-detail-score="${q.id}"></div>
-               <div class="field"><label>ความคิดเห็น</label><input class="input" type="text" value="${e(manual?.comment || '')}" placeholder="ความคิดเห็นถึงนักเรียน" data-detail-comment="${q.id}"></div>
-               <button class="btn btn--primary" type="button" data-save-detail-grade="${q.id}">${icon('save', 12)} บันทึก</button>
-             </div>
-             ${manual ? `<div class="grading-saved" style="margin-top:7px">${icon('check-circle', 12)} ตรวจเมื่อ ${thaiTime(manual.gradedAt)} น.</div>` : ''}`
-          : `<div class="answer-review-line"><span>คำตอบของนักเรียน</span><strong class="${isCorrect(q, value) ? 'is-correct' : 'is-wrong'}">${mathText(answerText(q, value))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(value)) : null, 'answer-review-line__image')}</div>
-             ${!isCorrect(q, value) ? `<div class="answer-review-line"><span>คำตอบที่ถูก</span><strong class="is-correct">${mathText(correctAnswerText(q))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(q.correct)) : null, 'answer-review-line__image')}</div>` : ''}
-             ${q.explanation ? `<div class="answer-explanation" style="margin-top:4px">${icon('info', 12)}<span>${mathText(q.explanation)}</span></div>` : ''}`}
+             <div class="answer-review-line"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—', { inlineDisplay: true })}</strong></div>
+             ${gradeForm}`
+          : isShort
+            ? `<div class="answer-review-line"><span>คำตอบของนักเรียน</span><strong class="${isCorrect(q, value) ? 'is-correct' : shortPending ? 'is-pending' : 'is-wrong'}">${mathText(answerText(q, value))}</strong></div>
+               ${!isCorrect(q, value) ? `<div class="answer-review-line"><span>คำตอบที่ถูก / ที่ยอมรับ</span><strong class="is-correct">${mathText(accepted.join(' หรือ ') || '—', { inlineDisplay: true })}</strong></div>` : ''}
+               ${(shortPending || manual) ? gradeForm : ''}
+               ${q.explanation ? `<div class="answer-explanation" style="margin-top:4px">${icon('info', 12)}<span>${mathText(q.explanation)}</span></div>` : ''}`
+            : `<div class="answer-review-line"><span>คำตอบของนักเรียน</span><strong class="${isCorrect(q, value) ? 'is-correct' : 'is-wrong'}">${mathText(answerText(q, value))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(value)) : null, 'answer-review-line__image')}</div>
+               ${!isCorrect(q, value) ? `<div class="answer-review-line"><span>คำตอบที่ถูก</span><strong class="is-correct">${mathText(correctAnswerText(q))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(q.correct)) : null, 'answer-review-line__image')}</div>` : ''}
+               ${q.explanation ? `<div class="answer-explanation" style="margin-top:4px">${icon('info', 12)}<span>${mathText(q.explanation)}</span></div>` : ''}`}
       </div>
     </article>`;
   }).join('');
@@ -1219,9 +1260,10 @@ export function teacherAnswerView(ctx) {
       <aside class="answer-side">
         <div class="card">
           <h3>สรุปคะแนน</h3>
-          <div class="result-summary-line"><span>ปรนัย + เติมคำ</span><strong>${formatNumber(score.auto, 1)} คะแนน</strong></div>
-          <div class="result-summary-line"><span>อัตนัย (ตรวจมือ)</span><strong>${formatNumber(score.manual, 1)} คะแนน</strong></div>
+          <div class="result-summary-line"><span>ปรนัย + เติมคำ (อัตโนมัติ)</span><strong>${formatNumber(score.auto, 1)} คะแนน</strong></div>
+          <div class="result-summary-line"><span>อัตนัย + เติมคำ (ตรวจมือ)</span><strong>${formatNumber(score.manual, 1)} คะแนน</strong></div>
           <div class="result-summary-line"><span>รวม</span><strong>${formatNumber(score.total, 1)} / ${score.max}</strong></div>
+          ${score.pending.length ? `<div class="result-summary-line"><span>รอตรวจ</span><strong style="color:var(--amber)">${score.pending.length} ข้อ</strong></div>` : ''}
           <div class="result-summary-line"><span>เกณฑ์ผ่าน</span><strong>${exam.passPercent}%</strong></div>
           ${score.overridden ? `<div class="result-summary-line"><span>ปรับคะแนนโดยครู</span><strong style="color:var(--coral-dark)">${formatNumber(score.total, 1)} คะแนน</strong></div>
              <div style="margin-top:9px" class="notice-strip notice-strip--info">${icon('info', 13)}<span>${e(attempt.overrideNote || 'ครูปรับคะแนนด้วยตนเอง')} <button type="button" data-override-clear style="border:0;background:none;color:var(--blue);font-size:9px;padding:0;text-decoration:underline">ยกเลิกการปรับ</button></span></div>` : ''}
@@ -2738,20 +2780,30 @@ export function teacherStudentExamView(ctx) {
   const status = studentExamStatus(exam, attempt);
   const score = attempt && attempt.status !== 'in_progress' ? attemptScore(exam, attempt) : null;
   const reviewed = attempt && attempt.status !== 'in_progress' ? attempt.reviewed : false;
+  const pendingIds = attempt ? new Set(pendingReviewQuestions(exam, attempt).map(q => q.id)) : new Set();
   const questionRows = attempt ? exam.questions.map((q, index) => {
     const value = getAnswerValue(attempt, q.id);
-    const correct = q.type === 'essay' ? null : isCorrect(q, value);
     const manual = attempt.manualScores?.[q.id];
+    const isShort = q.type === 'short';
+    const shortPending = isShort && pendingIds.has(q.id);
+    const correct = q.type === 'essay' || shortPending
+      ? null
+      : isShort && manual
+        ? Number(manual.score) >= q.points * 0.6
+        : isCorrect(q, value);
     const points = q.type === 'essay'
       ? (manual?.score ?? 'รอตรวจ')
-      : correct ? q.points : 0;
-    return `<div class="student-answer-row ${correct === true ? 'is-correct' : correct === false ? 'is-wrong' : ''}">
-      <div class="student-answer-row__head"><span>ข้อ ${index + 1}</span><span>${typeLabel(q.type)} · ${q.points} คะแนน</span><strong>${points} คะแนน</strong></div>
+      : isShort
+        ? (correct === true ? q.points : manual ? manual.score : shortPending ? 'รอตรวจ' : 0)
+        : correct ? q.points : 0;
+    const accepted = [...new Set([q.correct, ...(q.acceptedAnswers || [])].filter(Boolean).map(String))];
+    return `<div class="student-answer-row ${shortPending || (q.type === 'essay' && !manual) ? 'is-pending' : correct === true ? 'is-correct' : correct === false ? 'is-wrong' : ''}">
+      <div class="student-answer-row__head"><span>ข้อ ${index + 1}</span><span>${typeLabel(q.type)} · ${q.points} คะแนน</span><strong>${points === 'รอตรวจ' ? 'รอตรวจ' : `${points} คะแนน`}</strong></div>
       <div class="student-answer-row__question">${mathText(q.text)}</div>
       ${questionImageHTML(q, 'question-figure question-figure--review')}
-      <div class="student-answer-row__grid">
+      <div class="student-answer-row__grid ${q.type === 'essay' || isShort ? 'student-answer-row__grid--stacked' : ''}">
         <div><span>คำตอบของนักเรียน</span><strong>${value === null || value === undefined || value === '' ? '— ไม่ได้ตอบ —' : mathText(answerText(q, value))}</strong></div>
-        <div><span>${q.type === 'essay' ? 'แนวคำตอบ' : 'คำตอบที่ถูก'}</span><strong>${mathText(correctAnswerText(q))}</strong></div>
+        <div><span>${q.type === 'essay' ? 'แนวคำตอบ' : isShort ? 'คำตอบที่ถูก / ที่ยอมรับ' : 'คำตอบที่ถูก'}</span><strong>${mathText(q.type === 'essay' ? (q.reference || '—') : isShort ? (accepted.join(' หรือ ') || '—') : correctAnswerText(q), { inlineDisplay: true })}</strong></div>
       </div>
       ${manual?.comment ? `<div class="student-answer-row__comment">${icon('message-circle', 12)} ${e(manual.comment)}</div>` : ''}
     </div>`;
@@ -2771,7 +2823,7 @@ export function teacherStudentExamView(ctx) {
         <div class="student-exam-detail-summary card">
           <div><span>สถานะ</span>${badge(status.label, status.tone)}</div>
           <div><span>คะแนน</span><strong>${score.total}/${score.max} (${score.percent}%)</strong></div>
-          <div><span>ตรวจแล้ว</span><strong>${reviewed ? 'ครบแล้ว' : 'รอตรวจอัตนัย'}</strong></div>
+          <div><span>ตรวจแล้ว</span><strong>${score.pending.length ? `รอตรวจ ${score.pending.length} ข้อ` : reviewed ? 'ครบแล้ว' : 'รอตรวจ'}</strong></div>
           ${canManageExam(exam, session) ? `<a class="btn btn--ghost btn--sm" href="#/teacher/exam/${exam.id}/answer/${attempt.id}">${icon('clipboard-check', 13)} ไปหน้าตรวจคำตอบ</a>` : ''}
         </div>
         <div class="student-answer-list">${questionRows}</div>

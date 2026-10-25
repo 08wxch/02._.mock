@@ -27,7 +27,7 @@ function mathHTML(source, displayMode) {
  * Renders plain text plus inline/display LaTeX safely.
  * Supported: $...$, $$...$$, \(...\), \[...\].
  */
-export function mathText(value) {
+export function mathText(value, { inlineDisplay = false } = {}) {
   const input = String(value ?? '');
   let cursor = 0;
   let output = '';
@@ -36,7 +36,7 @@ export function mathText(value) {
     output += e(input.slice(cursor, match.index)).replace(/\n/g, '<br>');
     const display = Boolean(match[1] || match[2]);
     const source = match[1] || match[2] || match[3] || match[4] || '';
-    output += mathHTML(source, display);
+    output += mathHTML(source, inlineDisplay ? false : display);
     cursor = match.index + match[0].length;
   }
   output += e(input.slice(cursor)).replace(/\n/g, '<br>');

@@ -2813,7 +2813,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .student-answer-row__question { margin-top: 7px; font-size: 11px; line-height: 1.55; color: var(--ink); }
 .student-answer-row__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
 .student-answer-row__grid > div { padding: 8px 9px; border-radius: 8px; background: #f7f4ed; min-width: 0; }
-.student-answer-row__grid span { display: block; font-size: 7.5px; color: var(--muted); }
+.student-answer-row__grid > div > span { display: block; font-size: 7.5px; color: var(--muted); }
 .student-answer-row__grid strong { display: block; margin-top: 2px; font-size: 9px; line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; }
 .student-answer-row__comment { display: flex; gap: 5px; align-items: flex-start; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 8px; line-height: 1.5; color: var(--muted); }
 
@@ -3191,4 +3191,26 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .review-search { max-width: none; flex: 1 1 100%; }
   .review-group__code { display: none; }
   .review-queue-table tr.review-group-row td { padding: 8px 10px; }
+}
+
+/* Short-answer manual review and readable LaTeX reference answers */
+.answer-review-line strong.is-pending { color: #8a641f; }
+.student-answer-row.is-pending { border-left: 3px solid var(--amber); }
+.student-answer-row__grid--stacked { grid-template-columns: 1fr; }
+.student-answer-row__grid--stacked > div { width: 100%; }
+.student-answer-row__grid--stacked strong .math-inline { display: inline-block; max-width: 100%; vertical-align: middle; }
+.student-answer-row__grid--stacked strong .math-display { display: inline-block; max-width: 100%; margin: 6px 0; overflow-x: auto; vertical-align: middle; text-align: left; }
+.grading-hint {
+  display: flex; align-items: flex-start; gap: 5px; margin-top: 7px;
+  padding: 6px 8px; border-radius: 6px; background: var(--amber-soft);
+  color: #75602e; font-size: 8px; line-height: 1.5;
+}
+.grading-entry__answer-key {
+  display: flex; align-items: flex-start; gap: 5px; margin-top: 7px;
+  padding: 6px 8px; border-radius: 6px; background: #f3f8f4;
+  color: var(--muted); font-size: 8px; line-height: 1.55;
+}
+.grading-entry__answer-key strong { color: var(--ink-soft); font-weight: 500; }
+@media (max-width: 760px) {
+  .grading-entry__answer-key { font-size: 7.5px; }
 }

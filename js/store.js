@@ -1793,9 +1793,26 @@ export function correctAnswerText(question) {
   return question.reference || '—';
 }
 
-export function pendingEssayQuestions(exam, attempt) {
-  return exam.questions.filter(q => q.type === 'essay' && attempt.manualScores?.[q.id] === undefined);
+export function needsManualReview(question, attempt) {
+  if (!question || !attempt) return false;
+  if (attempt.manualScores?.[question.id] !== undefined) return false;
+  if (question.type === 'essay') return true;
+  if (question.type === 'short') {
+    const value = getAnswerValue(attempt, question.id);
+    // Exact accepted answers are checked automatically. A misspelled free-text
+    // answer is not thrown away; it goes to the teacher for a final decision.
+    return !answerIsEmpty(value) && !isCorrect(question, value);
+  }
+  return false;
 }
+
+export function pendingReviewQuestions(exam, attempt) {
+  return exam.questions.filter(q => needsManualReview(q, attempt));
+}
+
+// Kept as an alias for older callers. It now includes short answers that need
+// a teacher's judgement as well as essays.
+export const pendingEssayQuestions = pendingReviewQuestions;
 
 export function attemptScore(exam, attempt) {
   if (!attempt) {
@@ -1805,14 +1822,21 @@ export function attemptScore(exam, attempt) {
   let manual = 0;
   exam.questions.forEach(q => {
     const value = getAnswerValue(attempt, q.id);
-    if (isObjective(q.type)) {
+    if (q.type === 'short') {
+      if (isCorrect(q, value)) {
+        auto += Number(q.points) || 0;
+      } else {
+        const entry = attempt.manualScores?.[q.id];
+        if (entry && Number.isFinite(Number(entry.score))) manual += Number(entry.score);
+      }
+    } else if (isObjective(q.type)) {
       if (isCorrect(q, value)) auto += Number(q.points) || 0;
     } else if (q.type === 'essay') {
       const entry = attempt.manualScores?.[q.id];
       if (entry && Number.isFinite(Number(entry.score))) manual += Number(entry.score);
     }
   });
-  const pending = pendingEssayQuestions(exam, attempt);
+  const pending = pendingReviewQuestions(exam, attempt);
   const calculated = auto + manual;
   const overridden = Number.isFinite(Number(attempt.overrideScore));
   const total = overridden ? Number(attempt.overrideScore) : calculated;

@@ -29,12 +29,12 @@ function authVisual(db = null) {
   return `<section class="auth-visual">
     <div class="auth-visual__top">
       ${brand({ href: '#/login', variant: 'light', subtitle: 'ระบบสอบออนไลน์' })}
-      <span class="auth-visual__badge">${icon('sparkles', 13)} ห้องสอบที่ครูออกแบบได้เอง</span>
+      <span class="auth-visual__badge">${icon('sparkles', 13)} ห้องสอบที่ออกแบบมาเพื่อนักเรียน</span>
     </div>
     <div class="auth-visual__hero">
       <div class="eyebrow eyebrow--light" style="color:#d9b775"><span style="width:18px;height:1px;background:#d9b775"></span>จากห้องเรียน สู่หน้าจอ</div>
       <h1 class="auth-visual__quote">ตั้งสติให้มั่นทำสมาธิให้ดี<br><em>แล้วขอให้โชคดีกับการทำข้อสอบ</em></h1>
-      <p>สร้างชุดสอบ เปิดห้องสอบ และรับคำตอบจากนักเรียนได้ในที่เดียว ตรวจปรนัยอัตโนมัติ พร้อมประกาศผลเมื่อพร้อม</p>
+      <p>ทำข้อสอบได้จากทุกอุปกรณ์ ระบบบันทึกคำตอบให้อัตโนมัติ พร้อมบอกเวลาที่เหลือ และดูผลสอบได้ทันทีเมื่อครูประกาศผล</p>
       <div class="auth-points">
         <div class="auth-point"><span>${icon('check', 14)}</span><span>ตรวจผลอัตโนมัติ</span></div>
         <div class="auth-point"><span>${icon('cloud-check', 14)}</span><span>บันทึกคำตอบทุกคลิก</span></div>

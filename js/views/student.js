@@ -1121,6 +1121,22 @@ export function resultView(ctx) {
       else if (Number(manual.score) >= q.points * 0.6) { status = 'correct'; statusLabel = 'ผ่าน'; }
       else { status = 'wrong'; statusLabel = 'ควรปรับปรุง'; }
       pointsLabel = showScore ? (manual ? `${formatNumber(manual.score, 1)} / ${q.points} คะแนน` : `รอตรวจ · ${q.points} คะแนน`) : '—';
+    } else if (q.type === 'short') {
+      const ok = isCorrect(q, value);
+      if (!ok && manual) {
+        const passed = Number(manual.score) >= q.points * 0.6;
+        status = passed ? 'correct' : 'wrong';
+        statusLabel = 'ครูตรวจแล้ว';
+        pointsLabel = showScore ? `${formatNumber(manual.score, 1)} / ${q.points} คะแนน` : '—';
+      } else if (!ok && String(value ?? '').trim()) {
+        status = 'pending';
+        statusLabel = 'รอตรวจ';
+        pointsLabel = showScore ? `รอตรวจ · ${q.points} คะแนน` : '—';
+      } else {
+        status = ok ? 'correct' : 'wrong';
+        statusLabel = ok ? 'ถูกต้อง' : 'ตอบผิด';
+        pointsLabel = showScore ? `${ok ? q.points : 0} / ${q.points} คะแนน` : '—';
+      }
     } else {
       const ok = isCorrect(q, value);
       status = ok ? 'correct' : 'wrong';
@@ -1132,8 +1148,8 @@ export function resultView(ctx) {
       <div class="review-detail__q">${mathText(q.text)}</div>
       ${questionImageHTML(q, 'question-figure question-figure--review')}
       <div class="answer-line"><span>คำตอบของคุณ</span><strong>${mathText(answerText(q, value))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(value)) : null, 'answer-line__option-image')}</div>
-      ${status !== 'correct' && q.type !== 'essay' ? `<div class="answer-line answer-line--solution"><span>คำตอบที่ถูก</span><strong>${mathText(correctAnswerText(q))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(q.correct)) : null, 'answer-line__option-image')}</div>` : ''}
-      ${q.type === 'essay' ? `<div class="answer-line answer-line--solution"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—')}</strong></div>` : ''}
+      ${status !== 'correct' && q.type !== 'essay' ? `<div class="answer-line answer-line--solution"><span>${q.type === 'short' ? 'คำตอบที่ถูก / ที่ยอมรับ' : 'คำตอบที่ถูก'}</span><strong>${mathText(q.type === 'short' ? ([...new Set([q.correct, ...(q.acceptedAnswers || [])].filter(Boolean).map(String))].join(' หรือ ') || '—') : correctAnswerText(q), { inlineDisplay: true })}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(q.correct)) : null, 'answer-line__option-image')}</div>` : ''}
+      ${q.type === 'essay' ? `<div class="answer-line answer-line--solution"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—', { inlineDisplay: true })}</strong></div>` : ''}
       ${q.type === 'essay' && manual?.comment ? `<div class="teacher-comment"><strong>${icon('message-circle', 12)} ความคิดเห็นจากครู</strong>${e(manual.comment)}</div>` : ''}
       ${q.explanation ? `<div class="answer-explanation">${icon('info', 13)}<span>${mathText(q.explanation)}</span></div>` : ''}
       <div class="answer-line" style="margin-top:6px"><span>คะแนนข้อนี้</span><strong>${pointsLabel}</strong></div>
@@ -1150,7 +1166,7 @@ export function resultView(ctx) {
   }).join('');
 
   const teacherComments = exam.questions
-    .filter(q => q.type === 'essay' && attempt.manualScores?.[q.id]?.comment)
+    .filter(q => attempt.manualScores?.[q.id]?.comment)
     .map(q => `<div class="answer-explanation" style="margin-top:8px">${icon('message-circle', 13)}<span>${e(attempt.manualScores[q.id].comment)}</span></div>`)
     .join('');
 
