@@ -338,6 +338,7 @@ export function teacherExamsView(ctx) {
     const meta = statusMeta(exam.status);
     const manage = canManageExam(exam, session);
     const canEdit = canEditExam(exam, session);
+    const review = canReviewExam(exam, session);
     const statsVisible = canViewExamStats(exam, session);
     const creator = creatorOfExam(exam, db);
     const draftNote = exam.status === 'draft'
@@ -355,7 +356,7 @@ export function teacherExamsView(ctx) {
       <div class="exam-admin-card__creator">
         ${avatar(creator.name, creator.id || creator.name, 'xs')}
         <span><strong>สร้างโดย ${e(creator.name)}</strong><small>${e(examOrg)}${creator.isOwner ? ' · ผู้ดูแลระบบ' : ''}</small></span>
-        ${!canEdit ? `<span class="exam-admin-card__readonly">${icon('eye', 10)} ดูอย่างเดียว</span>` : !manage ? `<span class="exam-admin-card__readonly">${icon('edit', 10)} แก้ไขร่วม</span>` : ''}
+        ${!canEdit ? `<span class="exam-admin-card__readonly">${icon(review ? 'clipboard-check' : 'eye', 10)} ${review ? 'ผู้ตรวจคำตอบ' : 'ดูอย่างเดียว'}</span>` : !manage ? `<span class="exam-admin-card__readonly">${icon('edit', 10)} แก้ไขร่วม</span>` : ''}
       </div>
       <div class="exam-admin-card__meta">
         <span>${icon('file-text', 11)} ${exam.questions.length} ข้อ</span>
@@ -374,7 +375,7 @@ export function teacherExamsView(ctx) {
           ${canEdit ? `<a class="icon-btn" href="#/teacher/exam/${exam.id}/edit" title="แก้ไขชุดสอบ" aria-label="แก้ไข ${e(exam.title)}">${icon('edit', 14)}</a>` : ''}
           ${manage ? `<button class="icon-btn icon-btn--danger" type="button" data-delete-exam="${exam.id}" title="ลบชุดสอบ" aria-label="ลบ ${e(exam.title)}">${icon('trash', 14)}</button>` : ''}
           <button class="icon-btn" type="button" data-copy="${exam.code}" title="คัดลอกรหัสสอบ" aria-label="คัดลอกรหัสสอบ">${icon('copy', 14)}</button>
-          <a class="btn btn--ghost" href="${canEdit ? `#/teacher/exam/${exam.id}/edit` : `#/teacher/exam/${exam.id}/overview`}">${canEdit ? 'แก้ไข' : 'ดูข้อมูล'} ${icon('arrow-right', 11)}</a>
+          <a class="btn btn--ghost" href="${canEdit ? `#/teacher/exam/${exam.id}/edit` : review ? `#/teacher/exam/${exam.id}/grading` : `#/teacher/exam/${exam.id}/overview`}">${canEdit ? 'แก้ไข' : review ? 'ตรวจคำตอบ' : 'ดูข้อมูล'} ${icon('arrow-right', 11)}</a>
         </div>
       </div>
     </article>`;
