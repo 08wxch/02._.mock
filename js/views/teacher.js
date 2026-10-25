@@ -1380,10 +1380,10 @@ export function teacherReviewView(ctx) {
   const examIdsInUse = new Set(all.map(x => x.exam.id));
   const requestedExam = query.has('exam') ? query.get('exam') : savedFilters.exam;
   const initialExam = requestedExam === 'all' || examIdsInUse.has(requestedExam) ? requestedExam || 'all' : 'all';
-  const orgIdsInUse = new Set(all.flatMap(x => examOrganizationIds(x.exam, db)));
+  const reviewOrgs = visibleOrganizations(session, db);
   const requestedOrg = query.has('org') ? query.get('org') : savedFilters.org;
   const initialOrg = globalAccess
-    ? (requestedOrg === 'all' || orgIdsInUse.has(requestedOrg) ? requestedOrg || 'all' : 'all')
+    ? (requestedOrg === 'all' || reviewOrgs.some(org => org.id === requestedOrg) ? requestedOrg || 'all' : 'all')
     : (me?.orgId || 'all');
 
   const examOrder = [];
@@ -1431,7 +1431,7 @@ export function teacherReviewView(ctx) {
     const stats = statsFor(exam);
     return `<option value="${e(exam.id)}" ${initialExam === exam.id ? 'selected' : ''}>${e(exam.shortTitle || exam.title)} · ${stats.pending} รอตรวจ / ${stats.total} คำตอบ</option>`;
   }).join('');
-  const orgOptions = visibleOrganizations(session, db)
+  const orgOptions = reviewOrgs
     .filter(org => all.some(x => examOrganizationIds(x.exam, db).includes(org.id)))
     .map(org => {
       const count = all.filter(x => examOrganizationIds(x.exam, db).includes(org.id)).length;
