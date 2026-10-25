@@ -1919,9 +1919,10 @@ function studentCodeDefaults(org, db) {
 
 function openAddStudentModal(session, defaultOrgId = '') {
   const db = getDB();
-  const owner = hasAllOrganizationAccess(session);
+  const canChooseOrg = isOwnerTeacher(session)
+    || (isManagerStaff(session) && canManageOrganizations(session));
   const orgs = visibleOrganizations(session, db);
-  const defaultOrg = owner
+  const defaultOrg = canChooseOrg
     ? (findOrganization(defaultOrgId, db) || findOrganization(currentTeacher(session)?.orgId, db) || orgs[0])
     : findOrganization(currentTeacher(session)?.orgId, db);
   if (!defaultOrg) { toast('ยังไม่มีหน่วยงานสำหรับเพิ่มนักเรียน', 'error'); return; }
@@ -1931,7 +1932,7 @@ function openAddStudentModal(session, defaultOrgId = '') {
   let selectedClassIds = classes[0] ? [classes[0].id] : [];
   openModal({
     title: 'เพิ่มรายชื่อนักเรียน',
-    eyebrow: owner ? (isOwnerTeacher(session) ? 'Wich · เลือกหน่วยงานได้' : 'เลือกหน่วยงานได้') : `นักเรียนใหม่จะอยู่ใน ${defaultOrg.name}`,
+    eyebrow: canChooseOrg ? (isOwnerTeacher(session) ? 'Wich · เลือกหน่วยงานได้' : 'เลือกหน่วยงานได้') : `นักเรียนใหม่จะอยู่ใน ${defaultOrg.name}`,
     size: 'sm',
     body: `<form id="add-student-form" novalidate>
       <div class="field">
@@ -1940,10 +1941,10 @@ function openAddStudentModal(session, defaultOrgId = '') {
       </div>
       <div class="field">
         <label for="new-student-org">หน่วยงาน / โรงเรียน <span style="color:var(--coral)">*</span></label>
-        ${owner ? `<select class="select input--lg" id="new-student-org" name="orgId">
+        ${canChooseOrg ? `<select class="select input--lg" id="new-student-org" name="orgId">
           ${orgs.map(org => `<option value="${e(org.id)}" ${org.id === defaultOrg.id ? 'selected' : ''}>${e(org.name)} · ${e(org.shortName)}</option>`).join('')}
         </select>` : `<div class="fixed-field">${icon('school', 15)}<strong>${e(defaultOrg.name)}</strong><span>${e(defaultOrg.shortName)}</span></div>`}
-        <span class="field__hint">${owner ? 'เลือกหน่วยงานให้นักเรียนได้' : 'ครูสร้างนักเรียนในหน่วยงานของตนเองอัตโนมัติ ไม่ต้องเลือกโรงเรียน'}</span>
+        <span class="field__hint">${canChooseOrg ? 'เลือกหน่วยงานให้นักเรียนได้' : 'ครูสร้างนักเรียนในหน่วยงานของตนเองอัตโนมัติ ไม่ต้องเลือกโรงเรียน'}</span>
       </div>
       <div class="field">
         <label for="new-student-code">รหัสนักเรียน</label>
@@ -1961,9 +1962,9 @@ function openAddStudentModal(session, defaultOrgId = '') {
       <div class="field">
         <div class="field__label-row"><span class="field__label">class ของนักเรียน *</span><span class="field__hint">เลือกได้มากกว่า 1 class</span></div>
         <div data-student-class-options>${classCheckboxList(selectedClassIds, { classes })}</div>
-        <span class="field__hint">${owner ? 'นักเรียนอยู่ได้หลาย class ในหน่วยงานเดียวกัน' : 'เลือก class ที่มีอยู่ในหน่วยงานของคุณ · class สร้างโดย Wich'}</span>
+        <span class="field__hint">${canChooseOrg ? 'นักเรียนอยู่ได้หลาย class ในหน่วยงานเดียวกัน' : 'เลือก class ที่มีอยู่ในหน่วยงานของคุณ · class สร้างโดย Wich'}</span>
       </div>
-      ${owner ? `<div class="field">
+      ${canChooseOrg ? `<div class="field">
         <label for="new-student-class-code">สร้าง class ใหม่ (ไม่บังคับ)</label>
         <input class="input" id="new-student-class-code" name="newClassName" maxlength="32" placeholder="เช่น CSCA-C, TAS-A1">
         <span class="field__hint">ถ้ากรอก ระบบจะสร้าง class นี้ในหน่วยงานที่เลือกและเพิ่มนักเรียนเข้าไปพร้อมกัน</span>
@@ -2017,7 +2018,7 @@ function openAddStudentModal(session, defaultOrgId = '') {
         const data = new FormData(form);
         const org = selectedOrg();
         let ids = [...form.querySelectorAll('input[name="classIds"]:checked')].map(input => input.value);
-        const newName = owner ? String(data.get('newClassName') || '').trim() : '';
+        const newName = canChooseOrg ? String(data.get('newClassName') || '').trim() : '';
         if (newName) {
           const created = addClass(newName, session, org.id);
           if (created.ok) ids.push(created.class.id);
@@ -2187,6 +2188,7 @@ export function teacherStaffView(ctx) {
     const examCount = db.exams.filter(exam => exam.teacherId === t.id).length;
     const publishedCount = db.exams.filter(exam => exam.teacherId === t.id && exam.status !== 'draft').length;
     const roleLabel = t.roleLabel || (t.staffRole === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน');
+    const canManageCard = owner || (manager && (t.orgId === me?.orgId || canManageOrgs));
     return `<article class="staff-card ${t.isOwner ? 'staff-card--owner' : ''}">
       <div class="staff-card__head">
         <button class="staff-card__person" type="button" data-staff-open="${e(t.id)}" aria-label="เปิดข้อมูล ${e(t.name)}">
@@ -2203,7 +2205,7 @@ export function teacherStaffView(ctx) {
       </div>
       <div class="staff-card__foot">
         <span>${t.createdAt ? `เข้าร่วม ${thaiDate(t.createdAt)}` : 'บัญชีผู้ดูแล'}</span>
-        <button class="btn btn--link" type="button" data-staff-open="${e(t.id)}">${owner || globalAccess ? 'จัดการบัญชี' : 'ดูข้อมูล'}</button>
+        <button class="btn btn--link" type="button" data-staff-open="${e(t.id)}">${canManageCard ? 'จัดการบัญชี' : 'ดูข้อมูล'}</button>
       </div>
     </article>`;
   }).join('');
@@ -2326,7 +2328,9 @@ function openStaffDetailModal(teacherId, session) {
   const owner = isOwnerTeacher(session);
   const globalAccess = hasAllOrganizationAccess(session);
   const manager = isManagerStaff(session);
+  const canManageOrgs = canManageOrganizations(session);
   const me = currentTeacher(session);
+  const canManageStaff = owner || (manager && (teacher.orgId === me?.orgId || canManageOrgs));
   if (!owner && !globalAccess && !teacher.isOwner && teacher.orgId !== me?.orgId) {
     toast('คุณไม่มีสิทธิ์ดูบัญชีนอกหน่วยงาน', 'error');
     return;
@@ -2334,10 +2338,10 @@ function openStaffDetailModal(teacherId, session) {
   const org = findOrganization(teacher.orgId, db);
   const roleLabel = teacher.roleLabel || (teacher.isOwner ? 'ผู้สร้างระบบ' : teacher.staffRole === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน');
   const examCount = db.exams.filter(exam => exam.teacherId === teacher.id).length;
-  const canDelete = owner ? !teacher.isOwner : (globalAccess || manager) && !teacher.isOwner && teacher.staffRole === 'teacher' && (globalAccess || teacher.orgId === me?.orgId) && teacher.id !== me?.id;
-  const canMove = (owner || globalAccess) && !teacher.isOwner;
-  const canEditCode = !teacher.isOwner && (owner || globalAccess || Boolean(manager && me?.orgId === teacher.orgId
-    && (teacher.staffRole !== 'manager' || teacher.id === me?.id)));
+  const canDelete = owner ? !teacher.isOwner : canManageStaff && !teacher.isOwner && teacher.staffRole === 'teacher' && (canManageOrgs || teacher.orgId === me?.orgId) && teacher.id !== me?.id;
+  const canMove = (owner || (manager && canManageOrgs)) && !teacher.isOwner;
+  const canEditCode = !teacher.isOwner && (owner || (canManageStaff
+    && (teacher.staffRole !== 'manager' || teacher.id === session.teacherId)));
   const isSelf = teacher.id === session.teacherId;
   const showSecret = owner || isSelf;
   const secretBlock = showSecret
@@ -2358,7 +2362,7 @@ function openStaffDetailModal(teacherId, session) {
     : '';
   openModal({
     title: 'ข้อมูลครูและบุคลากร',
-    eyebrow: owner || globalAccess ? 'จัดการบัญชี' : 'ข้อมูลในหน่วยงาน',
+    eyebrow: canManageStaff ? 'จัดการบัญชี' : 'ข้อมูลในหน่วยงาน',
     size: 'sm',
     body: `<div class="account-profile staff-profile">
       <div class="account-profile__hero">
@@ -2394,7 +2398,11 @@ function openStaffDetailModal(teacherId, session) {
         </div>
         <button class="btn btn--ghost btn--sm" type="submit">${icon('save', 12)} บันทึกหน่วยงาน</button>
       </form>` : ''}
-      <p class="account-profile__hint">${icon('shield-check', 12)} ${owner || globalAccess ? 'จัดการรหัส หน่วยงาน และลบบัญชีได้ · รหัสของ Wich ถูกป้องกัน · การลบจะซ่อนบัญชีแต่เก็บประวัติชุดสอบไว้' : 'ผู้จัดการแก้รหัส/เพิ่ม/ลบได้เฉพาะครูในหน่วยงานของตนเอง'}</p>
+      <p class="account-profile__hint">${icon('shield-check', 12)} ${canManageStaff
+        ? (canMove
+          ? 'จัดการรหัส หน่วยงาน และลบบัญชีได้ · รหัสของ Wich ถูกป้องกัน · การลบจะซ่อนบัญชีแต่เก็บประวัติชุดสอบไว้'
+          : 'จัดการรหัสและลบบัญชีครูในหน่วยงานของตนเองได้ · รหัสของ Wich ถูกป้องกัน')
+        : 'บัญชีครูดูข้อมูลได้อย่างเดียว · เฉพาะผู้จัดการหน่วยงานที่มีสิทธิ์จึงจะจัดการบัญชีได้'}</p>
     </div>`,
     footer: `<button class="btn btn--ghost" type="button" data-modal-close>ปิด</button>
       ${canDelete ? `<button class="btn btn--danger-ghost" type="button" data-staff-delete>${icon('trash', 13)} ลบบัญชีนี้</button>` : ''}`,
@@ -2705,6 +2713,7 @@ export function teacherStudentsView(ctx) {
   const owner = hasAllOrganizationAccess(session);
   const canAdmin = canManageOrganizations(session);
   const manager = isManagerStaff(session);
+  const canDeleteStudents = isOwnerTeacher(session) || canAdmin;
   const me = currentTeacher(session);
   const requestedOrg = ctx.query?.get?.('org') || '';
   const visibleOrgs = visibleOrganizations(session, db);
@@ -2735,7 +2744,7 @@ export function teacherStudentsView(ctx) {
           ${avatar(student.name, student.id, 'md')}
           <span class="student-card__copy"><strong>${e(student.name)}</strong><span>${e(student.code)} · ${icon('arrow-up-right', 10)} นามบัตร</span></span>
         </a>
-        ${manager && !canAdmin ? '' : (owner || canAdmin) ? `<button class="student-card__remove" type="button" data-remove-student="${e(student.id)}" aria-label="ลบ ${e(student.name)}" title="ลบรายชื่อ">${icon('trash', 14)}</button>` : ''}
+        ${canDeleteStudents ? `<button class="student-card__remove" type="button" data-remove-student="${e(student.id)}" aria-label="ลบ ${e(student.name)}" title="ลบรายชื่อ">${icon('trash', 14)}</button>` : ''}
       </div>
       <button class="student-class-edit" type="button" data-edit-student-classes="${e(student.id)}" aria-label="แก้ไข class ของ ${e(student.name)}">
         <span class="student-class-edit__label">class</span>
@@ -2761,7 +2770,7 @@ export function teacherStudentsView(ctx) {
     <div><div class="eyebrow">${icon('users', 12)} ทะเบียนนักเรียน</div><h1>นักเรียน</h1><p>${owner ? 'นักเรียนในทุกหน่วยงานที่คุณเข้าถึงได้ · เลือกกรองตามโรงเรียน/หน่วยงาน · คลิกนามบัตรเพื่อดูผลสอบรายชุด' : `เพิ่มนักเรียนและกำหนด class ใน ${e(scopeName)} · นักเรียนใหม่จะอยู่ในหน่วยงานของคุณอัตโนมัติ`}</p></div>
     <div class="teacher-page-head__actions">
       <button class="btn btn--ghost" type="button" data-export-students>${icon('download', 15)} ส่งออก Excel</button>
-      ${owner ? `<button class="btn btn--ghost" type="button" data-manage-classes>${icon('graduation-cap', 15)} จัดการ class</button>` : ''}
+      ${isOwnerTeacher(session) || canAdmin ? `<button class="btn btn--ghost" type="button" data-manage-classes>${icon('graduation-cap', 15)} จัดการ class</button>` : ''}
       <button class="btn btn--primary" type="button" data-add-student>${icon('plus', 15)} เพิ่มนักเรียน</button>
     </div>
   </div>
@@ -2792,8 +2801,10 @@ export function teacherStudentsView(ctx) {
         toast('ดาวน์โหลดทะเบียนนักเรียนแล้ว', 'success');
       });
       document.querySelectorAll('[data-add-student]').forEach(btn => btn.addEventListener('click', () => openAddStudentModal(session, orgFilter)));
-      if (owner) {
+      if (isOwnerTeacher(session) || canAdmin) {
         document.querySelectorAll('[data-manage-classes]').forEach(btn => btn.addEventListener('click', () => openClassManager(session, orgFilter)));
+      }
+      if (canDeleteStudents) {
         document.querySelectorAll('[data-remove-student]').forEach(btn => btn.addEventListener('click', () => confirmRemoveStudent(btn.dataset.removeStudent, session)));
       }
       document.querySelectorAll('[data-edit-student-classes]').forEach(button => button.addEventListener('click', () => {

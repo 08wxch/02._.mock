@@ -1,7 +1,7 @@
 import { icon } from '../icons.js';
 import { e, uid } from '../utils.js';
 import { toast, emptyState, confirmDialog } from '../ui.js';
-import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, isOwnerTeacher, findOrganization, examOrganizationIds, examOrganizationName, hasAllOrganizationAccess, organizationName, visibleOrganizations } from '../store.js';
+import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, isOwnerTeacher, isManagerStaff, canManageOrganizations, findOrganization, examOrganizationIds, examOrganizationName, organizationName, visibleOrganizations } from '../store.js';
 import { mathText } from '../math.js';
 import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { cloudUploadQuestionImage } from '../cloud.js';
@@ -599,8 +599,12 @@ export function createExamView(ctx) {
   if (!Array.isArray(draft.orgIds) || !draft.orgIds.length) {
     draft.orgIds = [draft.orgId || teacher?.orgId || allowedOrgs[0]?.id].filter(Boolean);
   }
-  const globalAccess = hasAllOrganizationAccess(session);
-  if (!globalAccess) {
+  // A teacher account may see every organization in a manage_all department,
+  // but only Wich or a manager of that department may create an exam for
+  // another organization.
+  const canChooseOrg = isOwnerTeacher(session)
+    || (isManagerStaff(session) && canManageOrganizations(session));
+  if (!canChooseOrg) {
     draft.orgIds = [teacher?.orgId || allowedOrgs[0]?.id].filter(Boolean);
   }
   draft.orgIds = [...new Set(draft.orgIds.filter(id => allowedOrgs.some(org => org.id === id)))];
@@ -614,7 +618,7 @@ export function createExamView(ctx) {
   const hasAttempts = isEdit && db.attempts.some(attempt => attempt.examId === sourceExam.id);
   const allOrgs = allowedOrgs;
   const selectedOrgs = draft.orgIds.map(id => findOrganization(id, db)).filter(Boolean);
-  const orgField = globalAccess && !hasAttempts
+  const orgField = canChooseOrg && !hasAttempts
     ? `<div class="field">
         <label>หน่วยงาน / โรงเรียนที่ทำข้อสอบ <span style="color:var(--coral)">*</span></label>
         <div class="org-picker" data-org-picker>

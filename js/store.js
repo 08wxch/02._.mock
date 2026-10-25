@@ -1449,8 +1449,12 @@ export function addStudent({ name, code, classId, classIds, className, orgId, pa
   const actorTeacher = currentTeacher(actor);
   if (!actorTeacher) return { ok: false, error: 'ต้องเข้าสู่ระบบด้วยบัญชีครูจึงเพิ่มนักเรียนได้' };
   const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
-  const owner = hasAllOrganizationAccess(actor, db);
-  let org = owner ? findOrganization(orgId, db) : findOrganization(actorTeacher.orgId, db);
+  // Only Wich and a manager whose organization has manage_all may choose a
+  // different organization. A teacher assigned to a manage_all organization
+  // still adds students to their own organization only.
+  const canChooseOrg = isOwnerTeacher(actor)
+    || (isManagerStaff(actor) && canManageOrganizations(actor));
+  let org = canChooseOrg ? findOrganization(orgId, db) : findOrganization(actorTeacher.orgId, db);
   if (!org) org = findOrganization(actorTeacher.orgId, db) || (db.organizations || [])[0];
   if (!org) return { ok: false, error: 'ไม่พบหน่วยงานหรือโรงเรียน' };
   if (!canAccessOrganization(org.id, actor, db)) return { ok: false, error: 'คุณไม่มีสิทธิ์เข้าถึงหน่วยงานนี้' };
@@ -1791,10 +1795,11 @@ export function setStudentPassword(studentId, nextPassword, actor = null) {
   const student = db.students.find(s => s.id === studentId);
   if (!student) return { ok: false, error: 'ไม่พบบัญชีนักเรียน' };
   const me = currentTeacher(actor);
+  const canManageAcrossOrganizations = isOwnerTeacher(actor)
+    || (isManagerStaff(actor) && canManageOrganizations(actor));
   const allowed = (actor?.role === 'student' && actor.studentId === studentId)
-    || isOwnerTeacher(actor)
-    || hasAllOrganizationAccess(actor)
-    || Boolean(me && !isManagerStaff(actor) && me.orgId === student.orgId);
+    || canManageAcrossOrganizations
+    || Boolean(me && me.orgId === student.orgId);
   if (!allowed) return { ok: false, error: 'คุณไม่มีสิทธิ์เปลี่ยนรหัสผ่านของนักเรียนคนนี้' };
   const password = String(nextPassword || '');
   if (password.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
