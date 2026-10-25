@@ -1463,11 +1463,19 @@ export function teacherReviewView(ctx) {
     const orgIds = examOrganizationIds(exam, db);
     const orgNames = examOrganizationName(exam, db);
     const stats = statsFor(exam);
+    const creator = creatorOfExam(exam, db);
+    const creatorName = creator?.name || exam.teacherName || 'ไม่ระบุครูผู้สร้าง';
+    const reviewers = (exam.reviewerIds || [])
+      .map(id => db.teachers.find(t => t.id === id && !t.deletedAt))
+      .filter(Boolean);
+    const reviewerNote = reviewers.length
+      ? ` · ผู้ตรวจ ${reviewers.map(t => t.name).join(', ')}`
+      : '';
     const group = `<tr class="review-group-row" data-review-group data-group-exam="${e(exam.id)}" data-group-orgs="${e(orgIds.join(' '))}">
       <td colspan="6">
         <div class="review-group__inner">
           <span class="review-group__icon">${icon('file-text', 13)}</span>
-          <span class="review-group__copy"><strong>${e(exam.shortTitle || exam.title)}</strong><small>${e(orgNames)} · ${stats.total} คำตอบ · ${stats.pending} รอตรวจ</small></span>
+          <span class="review-group__copy"><strong>${e(exam.shortTitle || exam.title)}</strong><small>${e(orgNames)} · สร้างโดย ${e(creatorName)}${e(reviewerNote)} · ${stats.total} คำตอบ · ${stats.pending} รอตรวจ</small></span>
           <span class="review-group__code">${e(exam.code)}</span>
         </div>
       </td>
@@ -1490,7 +1498,9 @@ export function teacherReviewView(ctx) {
 
   const examOptions = examOrder.map(exam => {
     const stats = statsFor(exam);
-    return `<option value="${e(exam.id)}" ${initialExam === exam.id ? 'selected' : ''}>${e(exam.shortTitle || exam.title)} · ${stats.pending} รอตรวจ / ${stats.total} คำตอบ</option>`;
+    const creator = creatorOfExam(exam, db);
+    const creatorName = creator?.name || exam.teacherName || 'ไม่ระบุครูผู้สร้าง';
+    return `<option value="${e(exam.id)}" ${initialExam === exam.id ? 'selected' : ''}>${e(exam.shortTitle || exam.title)} · โดย ${e(creatorName)} · ${stats.pending} รอตรวจ / ${stats.total} คำตอบ</option>`;
   }).join('');
   const orgOptions = reviewOrgs
     .filter(org => all.some(x => examOrganizationIds(x.exam, db).includes(org.id)))
