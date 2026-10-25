@@ -29,7 +29,7 @@ function authVisual(db = null) {
   return `<section class="auth-visual">
     <div class="auth-visual__top">
       ${brand({ href: '#/login', variant: 'light', subtitle: 'ระบบสอบออนไลน์' })}
-      <span class="auth-visual__badge">${icon('sparkles', 13)} ห้องสอบที่ออกแบบมาเพื่อนักเรียน</span>
+      <span class="auth-visual__badge">${icon('sparkles', 13)} ห้องสอบออนไลน์</span>
     </div>
     <div class="auth-visual__hero">
       <div class="eyebrow eyebrow--light" style="color:#d9b775"><span style="width:18px;height:1px;background:#d9b775"></span>จากห้องเรียน สู่หน้าจอ</div>

@@ -3214,3 +3214,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (max-width: 760px) {
   .grading-entry__answer-key { font-size: 7.5px; }
 }
+
+/* Teacher comments: keep each comment attached to its question and allow LaTeX */
+.teacher-comment__body { line-height: 1.6; overflow-wrap: anywhere; }
+.teacher-comment__body .math-display { text-align: left; margin: 5px 0; }
+.teacher-comment-list { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+.teacher-comment--summary { margin-top: 0; }
+.teacher-comment--summary strong { color: #6a5223; }

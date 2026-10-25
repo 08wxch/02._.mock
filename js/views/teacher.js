@@ -721,7 +721,7 @@ function gradingTab(exam, metrics) {
           </div>
           <div class="field">
             <label>ความคิดเห็น (ไม่บังคับ)</label>
-            <input class="input" type="text" value="${e(manual?.comment || '')}" placeholder="เช่น อธิบายขั้นตอนได้ชัดเจน" data-grade-comment>
+            <input class="input" type="text" value="${e(manual?.comment || '')}" placeholder="เช่น อธิบายขั้นตอนได้ชัดเจน หรือพิมพ์ $x=2$" data-grade-comment>
           </div>
           <button class="btn btn--primary" type="button" data-save-grade>${icon('save', 13)} บันทึกคะแนน</button>
         </div>
@@ -1199,7 +1199,7 @@ export function teacherAnswerView(ctx) {
 
     const gradeForm = `<div class="grade-inline">
       <div class="field score-input"><label>คะแนน / ${q.points}</label><input class="input" type="number" min="0" max="${q.points}" step="0.5" value="${manual ? manual.score : ''}" placeholder="0" data-detail-score="${q.id}"></div>
-      <div class="field"><label>ความคิดเห็น</label><input class="input" type="text" value="${e(manual?.comment || '')}" placeholder="ความคิดเห็นถึงนักเรียน" data-detail-comment="${q.id}"></div>
+      <div class="field"><label>ความคิดเห็น</label><input class="input" type="text" value="${e(manual?.comment || '')}" placeholder="ความคิดเห็นถึงนักเรียน (พิมพ์ LaTeX ได้ เช่น $x=2$)" data-detail-comment="${q.id}"></div>
       <button class="btn btn--primary" type="button" data-save-detail-grade="${q.id}">${icon('save', 12)} บันทึก</button>
     </div>
     ${manual ? `<div class="grading-saved" style="margin-top:7px">${icon('check-circle', 12)} ตรวจเมื่อ ${thaiTime(manual.gradedAt)} น.</div>` : `<div class="grading-hint">${icon('info', 11)} ระบบยังไม่ตัดสินว่าผิด — ครูสามารถให้คะแนนบางส่วนหรือ 0 ได้</div>`}`;
@@ -2805,7 +2805,7 @@ export function teacherStudentExamView(ctx) {
         <div><span>คำตอบของนักเรียน</span><strong>${value === null || value === undefined || value === '' ? '— ไม่ได้ตอบ —' : mathText(answerText(q, value))}</strong></div>
         <div><span>${q.type === 'essay' ? 'แนวคำตอบ' : isShort ? 'คำตอบที่ถูก / ที่ยอมรับ' : 'คำตอบที่ถูก'}</span><strong>${mathText(q.type === 'essay' ? (q.reference || '—') : isShort ? (accepted.join(' หรือ ') || '—') : correctAnswerText(q), { inlineDisplay: true })}</strong></div>
       </div>
-      ${manual?.comment ? `<div class="student-answer-row__comment">${icon('message-circle', 12)} ${e(manual.comment)}</div>` : ''}
+      ${manual?.comment ? `<div class="student-answer-row__comment">${icon('message-circle', 12)} <span><strong>ความคิดเห็นจากครู:</strong> ${mathText(manual.comment)}</span></div>` : ''}
     </div>`;
   }).join('') : '';
   const content = `<a class="page-back" href="#/teacher/student/${student.id}">${icon('arrow-left', 15)} กลับนามบัตร ${e(student.name)}</a>

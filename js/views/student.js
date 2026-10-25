@@ -1152,7 +1152,7 @@ export function resultView(ctx) {
       <div class="answer-line"><span>คำตอบของคุณ</span><strong>${mathText(answerText(q, value))}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(value)) : null, 'answer-line__option-image')}</div>
       ${status !== 'correct' && q.type !== 'essay' ? `<div class="answer-line answer-line--solution"><span>${q.type === 'short' ? 'คำตอบที่ถูก / ที่ยอมรับ' : 'คำตอบที่ถูก'}</span><strong>${mathText(q.type === 'short' ? ([...new Set([q.correct, ...(q.acceptedAnswers || [])].filter(Boolean).map(String))].join(' หรือ ') || '—') : correctAnswerText(q), { inlineDisplay: true })}</strong>${optionImageHTML(q.type === 'mcq' ? q.options.find(o => o.id === String(q.correct)) : null, 'answer-line__option-image')}</div>` : ''}
       ${q.type === 'essay' ? `<div class="answer-line answer-line--solution"><span>แนวคำตอบ</span><strong>${mathText(q.reference || '—', { inlineDisplay: true })}</strong></div>` : ''}
-      ${q.type === 'essay' && manual?.comment ? `<div class="teacher-comment"><strong>${icon('message-circle', 12)} ความคิดเห็นจากครู</strong>${e(manual.comment)}</div>` : ''}
+      ${manual?.comment ? `<div class="teacher-comment"><strong>${icon('message-circle', 12)} ความคิดเห็นจากครู</strong><div class="teacher-comment__body">${mathText(manual.comment)}</div></div>` : ''}
       ${q.explanation ? `<div class="answer-explanation">${icon('info', 13)}<span>${mathText(q.explanation)}</span></div>` : ''}
       <div class="answer-line" style="margin-top:6px"><span>คะแนนข้อนี้</span><strong>${pointsLabel}</strong></div>
     </div>` : '';
@@ -1168,8 +1168,12 @@ export function resultView(ctx) {
   }).join('');
 
   const teacherComments = exam.questions
-    .filter(q => attempt.manualScores?.[q.id]?.comment)
-    .map(q => `<div class="answer-explanation" style="margin-top:8px">${icon('message-circle', 13)}<span>${e(attempt.manualScores[q.id].comment)}</span></div>`)
+    .map((q, index) => ({ q, index, comment: attempt.manualScores?.[q.id]?.comment }))
+    .filter(item => item.comment)
+    .map(({ q, index, comment }) => `<div class="teacher-comment teacher-comment--summary">
+      <strong>${icon('message-circle', 12)} ข้อ ${index + 1} · ${e(typeLabel(q.type))}</strong>
+      <div class="teacher-comment__body">${mathText(comment)}</div>
+    </div>`)
     .join('');
 
   const content = `<main class="result-shell result-page">
@@ -1223,7 +1227,7 @@ export function resultView(ctx) {
           ${score.overridden ? `<div class="result-summary-line"><span>หมายเหตุ</span><strong>ครูปรับคะแนนแล้ว</strong></div>` : ''}`
           : `<div class="notice-strip notice-strip--info">${icon('lock', 14)}<span>ครูเลือกไม่แสดงคะแนนสำหรับชุดสอบนี้</span></div>`}
           <div class="result-summary-line"><span>ตอบแล้ว</span><strong>${countAnswered(exam, attempt)} / ${exam.questions.length} ข้อ</strong></div>
-          ${teacherComments ? `<div class="result-summary-line" style="display:block"><span style="display:block;margin-bottom:5px">ความคิดเห็นจากครู</span>${teacherComments}</div>` : ''}
+          ${teacherComments ? `<div class="result-summary-line" style="display:block"><span style="display:block;margin-bottom:5px">ความคิดเห็นจากครู</span><div class="teacher-comment-list">${teacherComments}</div></div>` : ''}
         </div>
         ${showRank && showScore && rank > 0 ? `<div class="card result-rank-card">
           <h3>อันดับในห้อง</h3>
