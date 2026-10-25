@@ -305,6 +305,18 @@ export function teacherExamsView(ctx) {
   const { session } = ctx;
   const db = getDB();
   const owner = hasAllOrganizationAccess(session);
+  const me = currentTeacher(session);
+  const query = ctx.query || new URLSearchParams();
+  let savedFilters = {};
+  try { savedFilters = JSON.parse(sessionStorage.getItem('examio_teacher_exam_filters_v1') || '{}'); } catch { savedFilters = {}; }
+  const validStatuses = ['all', 'open', 'saved', 'draft', 'closed', 'announced'];
+  const initialStatus = query.get('status') && validStatuses.includes(query.get('status'))
+    ? query.get('status')
+    : (validStatuses.includes(savedFilters.status) ? savedFilters.status : 'all');
+  const requestedOrg = query.has('org') ? query.get('org') : savedFilters.org;
+  const initialOrg = owner
+    ? (requestedOrg === 'all' || db.organizations.some(org => org.id === requestedOrg) ? requestedOrg || 'all' : 'all')
+    : (me?.orgId || 'all');
   const exams = [...visibleExams(session, db)].sort((a, b) => {
     const order = { open: 0, saved: 1, draft: 2, closed: 3, announced: 4 };
     return (order[a.status] ?? 9) - (order[b.status] ?? 9) || new Date(b.createdAt) - new Date(a.createdAt);
@@ -369,7 +381,7 @@ export function teacherExamsView(ctx) {
     <option value="all">ทุกหน่วยงาน (${exams.length})</option>
     ${visibleOrgs.map(org => {
       const count = exams.filter(exam => examOrganizationIds(exam, db).includes(org.id)).length;
-      return `<option value="${e(org.id)}">${e(org.name)} (${count})</option>`;
+      return `<option value="${e(org.id)}" ${initialOrg === org.id ? 'selected' : ''}>${e(org.name)} (${count})</option>`;
     }).join('')}
   </select>`;
   const content = `<div class="teacher-page-head">
@@ -385,12 +397,12 @@ export function teacherExamsView(ctx) {
   </div>
   <div class="exam-filter-row">
     <div class="chip-select" data-exam-filters>
-      ${[['all', 'ทั้งหมด', counts.all], ['open', 'กำลังสอบ', counts.open], ['saved', 'บันทึกแล้ว', counts.saved], ['draft', 'ฉบับร่าง', counts.draft], ['closed', 'ปิดสอบ', counts.closed], ['announced', 'ประกาศผล', counts.announced]].map(([key, label, count], i) => `<button type="button" class="chip ${i === 0 ? 'is-active' : ''}" data-filter="${key}">${label} <span>${count}</span></button>`).join('')}
+      ${[['all', 'ทั้งหมด', counts.all], ['open', 'กำลังสอบ', counts.open], ['saved', 'บันทึกแล้ว', counts.saved], ['draft', 'ฉบับร่าง', counts.draft], ['closed', 'ปิดสอบ', counts.closed], ['announced', 'ประกาศผล', counts.announced]].map(([key, label, count]) => `<button type="button" class="chip ${initialStatus === key ? 'is-active' : ''}" data-filter="${key}">${label} <span>${count}</span></button>`).join('')}
     </div>
     ${owner ? orgFilter : ''}
   </div>
   ${exams.length ? `<div class="exam-card-grid" data-exam-list>${cards}</div>` : `<div class="card">${emptyState({ iconName: 'file-text', title: 'ยังไม่มีชุดสอบ', text: 'สร้างชุดสอบแรก แล้วกำหนดวันเริ่มและวันปิดรับ', action: '<a class="btn btn--primary" href="#/teacher/create">สร้างชุดสอบ</a>' })}</div>`}
-  <div class="table-empty" data-exam-empty style="display:none">ไม่พบชุดสอบในสถานะนี้</div>`;
+  <div class="table-empty" data-exam-empty style="display:none">ไม่พบชุดสอบตามตัวกรองที่เลือก</div>`;
   return {
     html: teacherShell(session, { active: 'exams', crumb: 'ชุดสอบทั้งหมด', content }),
     mount() {
@@ -398,14 +410,24 @@ export function teacherExamsView(ctx) {
       bindDeleteExamButtons(session);
       const filters = document.querySelector('[data-exam-filters]');
       const orgSelect = document.querySelector('[data-exam-org-filter]');
+      let currentStatus = initialStatus;
+      let currentOrg = owner ? initialOrg : (me?.orgId || 'all');
+      const writeUrl = () => {
+        const raw = location.hash.replace(/^#/, '') || '/teacher/exams';
+        const [path, qs = ''] = raw.split('?');
+        const params = new URLSearchParams(qs);
+        if (currentStatus && currentStatus !== 'all') params.set('status', currentStatus); else params.delete('status');
+        if (owner && currentOrg && currentOrg !== 'all') params.set('org', currentOrg); else params.delete('org');
+        const next = `#${path}${params.toString() ? `?${params}` : ''}`;
+        history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
+        try { sessionStorage.setItem('examio_teacher_exam_filters_v1', JSON.stringify({ status: currentStatus, org: owner ? currentOrg : 'all' })); } catch {}
+      };
       const applyFilters = () => {
-        const status = filters?.querySelector('[data-filter].is-active')?.dataset.filter || 'all';
-        const orgId = orgSelect?.value || 'all';
         let visibleCount = 0;
         document.querySelectorAll('[data-exam-status]').forEach(card => {
           const orgs = String(card.dataset.examOrgs || '').split(' ').filter(Boolean);
-          const show = (status === 'all' || card.dataset.examStatus === status)
-            && (orgId === 'all' || orgs.includes(orgId));
+          const show = (currentStatus === 'all' || card.dataset.examStatus === currentStatus)
+            && (currentOrg === 'all' || orgs.includes(currentOrg));
           card.classList.toggle('hidden', !show);
           if (show) visibleCount += 1;
         });
@@ -415,10 +437,21 @@ export function teacherExamsView(ctx) {
       filters?.addEventListener('click', ev => {
         const btn = ev.target.closest('[data-filter]');
         if (!btn) return;
+        currentStatus = btn.dataset.filter || 'all';
         filters.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('is-active', b === btn));
         applyFilters();
+        writeUrl();
       });
-      orgSelect?.addEventListener('change', applyFilters);
+      orgSelect?.addEventListener('change', () => {
+        currentOrg = orgSelect.value || 'all';
+        applyFilters();
+        writeUrl();
+      });
+      if (orgSelect && currentOrg !== 'all' && ![...orgSelect.options].some(option => option.value === currentOrg)) {
+        currentOrg = 'all';
+        orgSelect.value = 'all';
+      }
+      applyFilters();
     }
   };
 }
@@ -1284,6 +1317,8 @@ export function teacherAnswerView(ctx) {
 export function teacherReviewView(ctx) {
   const { session } = ctx;
   const db = getDB();
+  const globalAccess = hasAllOrganizationAccess(session);
+  const me = currentTeacher(session);
   const all = db.attempts
     .filter(a => a.status !== 'in_progress')
     .map(a => ({ attempt: a, exam: db.exams.find(x => x.id === a.examId) }))
@@ -1291,10 +1326,53 @@ export function teacherReviewView(ctx) {
     .sort((a, b) => new Date(b.attempt.submittedAt) - new Date(a.attempt.submittedAt));
   const needsReview = ({ attempt, exam }) => !attempt.reviewed || pendingEssayQuestions(exam, attempt).length > 0;
   const pending = all.filter(needsReview).length;
-  const rows = all.map(({ attempt: a, exam }) => {
-    const score = attemptScore(exam, a);
-    const status = needsReview({ attempt: a, exam }) ? { label: 'รอตรวจ', tone: 'warning' } : { label: 'ตรวจแล้ว', tone: 'success' };
-    return `<tr data-review-row data-review-status="${needsReview({ attempt: a, exam }) ? 'pending' : 'reviewed'}" data-name="${e(a.studentName.toLowerCase())}" data-exam="${e(exam.title.toLowerCase())}">
+
+  const query = ctx.query || new URLSearchParams();
+  let savedFilters = {};
+  try { savedFilters = JSON.parse(sessionStorage.getItem('examio_teacher_review_filters_v1') || '{}'); } catch { savedFilters = {}; }
+  const validStatuses = ['pending', 'reviewed', 'all'];
+  const initialStatus = query.get('status') && validStatuses.includes(query.get('status'))
+    ? query.get('status')
+    : (validStatuses.includes(savedFilters.status) ? savedFilters.status : 'pending');
+  const examIdsInUse = new Set(all.map(x => x.exam.id));
+  const requestedExam = query.has('exam') ? query.get('exam') : savedFilters.exam;
+  const initialExam = requestedExam === 'all' || examIdsInUse.has(requestedExam) ? requestedExam || 'all' : 'all';
+  const orgIdsInUse = new Set(all.flatMap(x => examOrganizationIds(x.exam, db)));
+  const requestedOrg = query.has('org') ? query.get('org') : savedFilters.org;
+  const initialOrg = globalAccess
+    ? (requestedOrg === 'all' || orgIdsInUse.has(requestedOrg) ? requestedOrg || 'all' : 'all')
+    : (me?.orgId || 'all');
+
+  const examOrder = [];
+  const examSeen = new Set();
+  all.forEach(({ exam }) => {
+    if (examSeen.has(exam.id)) return;
+    examSeen.add(exam.id);
+    examOrder.push(exam);
+  });
+  const statsFor = exam => {
+    const items = all.filter(x => x.exam.id === exam.id);
+    return { total: items.length, pending: items.filter(needsReview).length };
+  };
+  const rows = examOrder.map(exam => {
+    const items = all.filter(x => x.exam.id === exam.id);
+    const orgIds = examOrganizationIds(exam, db);
+    const orgNames = examOrganizationName(exam, db);
+    const stats = statsFor(exam);
+    const group = `<tr class="review-group-row" data-review-group data-group-exam="${e(exam.id)}" data-group-orgs="${e(orgIds.join(' '))}">
+      <td colspan="6">
+        <div class="review-group__inner">
+          <span class="review-group__icon">${icon('file-text', 13)}</span>
+          <span class="review-group__copy"><strong>${e(exam.shortTitle || exam.title)}</strong><small>${e(orgNames)} · ${stats.total} คำตอบ · ${stats.pending} รอตรวจ</small></span>
+          <span class="review-group__code">${e(exam.code)}</span>
+        </div>
+      </td>
+    </tr>`;
+    const rowsForExam = items.map(({ attempt: a, exam }) => {
+      const score = attemptScore(exam, a);
+      const isPending = needsReview({ attempt: a, exam });
+      const status = isPending ? { label: 'รอตรวจ', tone: 'warning' } : { label: 'ตรวจแล้ว', tone: 'success' };
+      return `<tr data-review-row data-review-status="${isPending ? 'pending' : 'reviewed'}" data-exam-id="${e(exam.id)}" data-org-ids="${e(orgIds.join(' '))}" data-name="${e(a.studentName.toLowerCase())}" data-exam="${e(exam.title.toLowerCase())}">
       <td><div class="table-person">${avatar(a.studentName, a.studentId, 'sm')}<span class="table-person__copy"><strong>${e(a.studentName)}</strong><span>${e(a.studentCode)}</span></span></div></td>
       <td><span class="exam-pill"><span class="subject-dot"></span>${e(exam.shortTitle || exam.title)}</span></td>
       <td><span style="font-size:9.5px;color:var(--muted)">${thaiTime(a.submittedAt)} น. · ${relativeTime(a.submittedAt)}</span></td>
@@ -1302,28 +1380,55 @@ export function teacherReviewView(ctx) {
       <td><strong class="table-number">${formatNumber(score.total, 1)}</strong><span style="font-size:8.5px;color:var(--muted)"> / ${score.max}</span></td>
       <td><div class="table-actions"><a class="btn btn--primary" href="#/teacher/exam/${exam.id}/answer/${a.id}">${icon('eye', 12)} ตรวจคำตอบ</a></div></td>
     </tr>`;
+    }).join('');
+    return group + rowsForExam;
   }).join('');
 
+  const examOptions = examOrder.map(exam => {
+    const stats = statsFor(exam);
+    return `<option value="${e(exam.id)}" ${initialExam === exam.id ? 'selected' : ''}>${e(exam.shortTitle || exam.title)} · ${stats.pending} รอตรวจ / ${stats.total} คำตอบ</option>`;
+  }).join('');
+  const orgOptions = db.organizations
+    .filter(org => all.some(x => examOrganizationIds(x.exam, db).includes(org.id)))
+    .map(org => {
+      const count = all.filter(x => examOrganizationIds(x.exam, db).includes(org.id)).length;
+      return `<option value="${e(org.id)}" ${initialOrg === org.id ? 'selected' : ''}>${e(org.name)} (${count})</option>`;
+    }).join('');
+
   const content = `<div class="teacher-page-head">
-    <div><div class="eyebrow">${icon('clipboard-check', 12)} คิวงานครู</div><h1>ตรวจคำตอบ</h1><p>รวมคำตอบจากชุดสอบที่คุณดูแล เรียงจากใหม่ไปเก่า</p></div>
+    <div><div class="eyebrow">${icon('clipboard-check', 12)} คิวงานครู</div><h1>ตรวจคำตอบ</h1><p>แยกดูตามชุดสอบและหน่วยงาน เพื่อไม่ให้คำตอบหลายบททดสอบปนกัน</p></div>
     <div class="teacher-page-head__actions"><a class="btn btn--ghost" href="#/teacher/exams">${icon('file-text', 15)} ไปที่ชุดสอบ</a></div>
   </div>
   <div class="metric-grid" style="grid-template-columns:repeat(3,1fr)">
     ${metricCard({ iconName: 'clipboard-check', label: 'รอตรวจ', value: pending, unit: 'รายการ', accent: true, dot: pending > 0, foot: 'เปิดดูเพื่อเคลียร์คิว' })}
     ${metricCard({ iconName: 'check-circle', label: 'ตรวจแล้ว', value: all.length - pending, unit: 'รายการ', foot: 'พร้อมประกาศผล' })}
-    ${metricCard({ iconName: 'file-text', label: 'ชุดสอบที่มีคำตอบ', value: new Set(all.map(x => x.exam.id)).size, unit: 'ชุด', foot: 'จากทุกวิชา' })}
+    ${metricCard({ iconName: 'file-text', label: 'ชุดสอบที่มีคำตอบ', value: examOrder.length, unit: 'ชุด', foot: 'แยกตามบททดสอบ' })}
   </div>
   <section class="teacher-card">
+    <div class="review-filter-bar">
+      <label class="review-filter-field"><span>${icon('file-text', 12)} ชุดสอบ</span>
+        <select class="select" data-review-exam aria-label="เลือกชุดสอบที่ต้องการตรวจ">
+          <option value="all" ${initialExam === 'all' ? 'selected' : ''}>ทุกชุดสอบ (${all.length} คำตอบ)</option>
+          ${examOptions}
+        </select>
+      </label>
+      ${globalAccess ? `<label class="review-filter-field"><span>${icon('school', 12)} หน่วยงาน</span>
+        <select class="select" data-review-org aria-label="กรองคำตอบตามหน่วยงาน">
+          <option value="all" ${initialOrg === 'all' ? 'selected' : ''}>ทุกหน่วยงาน (${all.length})</option>
+          ${orgOptions}
+        </select>
+      </label>` : ''}
+      <label class="search-field review-search">${icon('search', 17)}<input type="search" placeholder="ค้นหาชื่อนักเรียนหรือชุดสอบ..." value="${e(query.get('q') || '')}" data-review-search></label>
+    </div>
     <div class="table-toolbar">
       <div class="table-toolbar__left">
-        <label class="search-field">${icon('search', 17)}<input type="search" placeholder="ค้นหาชื่อนักเรียนหรือชุดสอบ..." data-review-search></label>
         <div class="chip-select" data-review-filters>
-          <button class="chip is-active" type="button" data-review-filter="pending">รอตรวจ (${pending})</button>
-          <button class="chip" type="button" data-review-filter="reviewed">ตรวจแล้ว (${all.length - pending})</button>
-          <button class="chip" type="button" data-review-filter="all">ทั้งหมด (${all.length})</button>
+          <button class="chip ${initialStatus === 'pending' ? 'is-active' : ''}" type="button" data-review-filter="pending">รอตรวจ (${pending})</button>
+          <button class="chip ${initialStatus === 'reviewed' ? 'is-active' : ''}" type="button" data-review-filter="reviewed">ตรวจแล้ว (${all.length - pending})</button>
+          <button class="chip ${initialStatus === 'all' ? 'is-active' : ''}" type="button" data-review-filter="all">ทั้งหมด (${all.length})</button>
         </div>
       </div>
-      <span class="table-caption" data-review-count>${pending} รายการ</span>
+      <span class="table-caption" data-review-count>${initialStatus === 'pending' ? `${pending} รายการ` : ''}</span>
     </div>
     <div class="scroll-x">
       <table class="data-table review-queue-table">
@@ -1338,29 +1443,89 @@ export function teacherReviewView(ctx) {
     html: teacherShell(session, { active: 'review', crumb: 'ตรวจคำตอบ', content }),
     mount() {
       mountTeacherShell(session);
-      let currentFilter = 'pending';
+      let currentFilter = initialStatus;
+      let currentExam = initialExam;
+      let currentOrg = globalAccess ? initialOrg : (me?.orgId || 'all');
       const rowsEls = [...document.querySelectorAll('[data-review-row]')];
       const search = document.querySelector('[data-review-search]');
+      const examSelect = document.querySelector('[data-review-exam]');
+      const orgSelect = document.querySelector('[data-review-org]');
       const count = document.querySelector('[data-review-count]');
       const empty = document.querySelector('[data-review-empty]');
+
+      if (examSelect && currentExam !== 'all' && ![...examSelect.options].some(option => option.value === currentExam)) {
+        currentExam = 'all';
+        examSelect.value = 'all';
+      }
+      if (orgSelect && currentOrg !== 'all' && ![...orgSelect.options].some(option => option.value === currentOrg)) {
+        currentOrg = 'all';
+        orgSelect.value = 'all';
+      }
+
+      const writeUrl = () => {
+        const raw = location.hash.replace(/^#/, '') || '/teacher/review';
+        const [path, qs = ''] = raw.split('?');
+        const params = new URLSearchParams(qs);
+        if (currentFilter !== 'all') params.set('status', currentFilter); else params.delete('status');
+        if (currentExam !== 'all') params.set('exam', currentExam); else params.delete('exam');
+        if (globalAccess && currentOrg !== 'all') params.set('org', currentOrg); else params.delete('org');
+        const term = (search?.value || '').trim();
+        if (term) params.set('q', term); else params.delete('q');
+        const next = `#${path}${params.toString() ? `?${params}` : ''}`;
+        history.replaceState(null, '', `${location.pathname}${location.search}${next}`);
+        try {
+          sessionStorage.setItem('examio_teacher_review_filters_v1', JSON.stringify({
+            status: currentFilter, exam: currentExam, org: globalAccess ? currentOrg : 'all'
+          }));
+        } catch {}
+      };
+
       function apply() {
         const q = (search?.value || '').trim().toLowerCase();
         let visible = 0;
+        const visibleByExam = new Map();
         rowsEls.forEach(row => {
+          const orgIds = String(row.dataset.orgIds || '').split(' ').filter(Boolean);
           const match = (currentFilter === 'all' || row.dataset.reviewStatus === currentFilter)
+            && (currentExam === 'all' || row.dataset.examId === currentExam)
+            && (currentOrg === 'all' || orgIds.includes(currentOrg))
             && (!q || row.dataset.name.includes(q) || row.dataset.exam.includes(q));
           row.classList.toggle('hidden', !match);
-          if (match) visible++;
+          if (match) {
+            visible++;
+            visibleByExam.set(row.dataset.examId, (visibleByExam.get(row.dataset.examId) || 0) + 1);
+          }
         });
-        count.textContent = `${visible} รายการ`;
-        empty.style.display = visible ? 'none' : 'block';
+        let visibleGroups = 0;
+        document.querySelectorAll('[data-review-group]').forEach(group => {
+          const groupOrgIds = String(group.dataset.groupOrgs || '').split(' ').filter(Boolean);
+          const groupMatch = (currentExam === 'all' || group.dataset.groupExam === currentExam)
+            && (currentOrg === 'all' || groupOrgIds.includes(currentOrg));
+          const hasVisible = Boolean(visibleByExam.get(group.dataset.groupExam));
+          group.classList.toggle('hidden', !groupMatch || !hasVisible);
+          if (groupMatch && hasVisible) visibleGroups++;
+        });
+        if (count) count.textContent = visible ? `${visible} รายการ · ${visibleGroups} ชุดสอบ` : '0 รายการ';
+        if (empty) empty.style.display = visible ? 'none' : 'block';
       }
+
       document.querySelectorAll('[data-review-filter]').forEach(btn => btn.addEventListener('click', () => {
-        currentFilter = btn.dataset.reviewFilter;
+        currentFilter = btn.dataset.reviewFilter || 'pending';
         document.querySelectorAll('[data-review-filter]').forEach(b => b.classList.toggle('is-active', b === btn));
         apply();
+        writeUrl();
       }));
-      search?.addEventListener('input', apply);
+      examSelect?.addEventListener('change', () => {
+        currentExam = examSelect.value || 'all';
+        apply();
+        writeUrl();
+      });
+      orgSelect?.addEventListener('change', () => {
+        currentOrg = orgSelect.value || 'all';
+        apply();
+        writeUrl();
+      });
+      search?.addEventListener('input', () => { apply(); writeUrl(); });
       apply();
     }
   };

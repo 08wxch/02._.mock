@@ -3161,3 +3161,34 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .org-picker, .org-picker__actions, .qb-option__upload { display: none !important; }
   .qb-option__image .btn { display: none !important; }
 }
+
+/* Review queue: separate by exam and organization */
+.review-filter-bar {
+  display: flex; align-items: flex-end; gap: 9px; flex-wrap: wrap;
+  padding: 12px 14px; border-bottom: 1px solid var(--line); background: #fcfdfc;
+}
+.review-filter-field { display: grid; gap: 4px; min-width: 210px; flex: 1 1 240px; }
+.review-filter-field > span { display: inline-flex; align-items: center; gap: 5px; font-size: 8.5px; color: var(--muted); font-weight: 500; }
+.review-filter-field .select { width: 100%; min-height: 32px; font-size: 9.5px; background: #ffffff; }
+.review-search { flex: 1 1 220px; max-width: 320px; min-height: 32px; }
+.review-queue-table tr.review-group-row td {
+  padding: 9px 12px; background: var(--surface-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.review-queue-table tr.review-group-row:first-child td { border-top: 0; }
+.review-group__inner { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.review-group__icon {
+  width: 25px; height: 25px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+  background: #e9f3ed; color: var(--green); flex: 0 0 auto;
+}
+.review-group__copy { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.review-group__copy strong { font-size: 10px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.review-group__copy small { font-size: 8px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.review-group__code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; color: var(--muted-2); background: #ffffff; border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; flex: 0 0 auto; }
+.review-toolbar .table-caption { white-space: nowrap; }
+@media (max-width: 760px) {
+  .review-filter-bar { padding: 10px 11px; gap: 7px; }
+  .review-filter-field { flex: 1 1 100%; min-width: 0; }
+  .review-search { max-width: none; flex: 1 1 100%; }
+  .review-group__code { display: none; }
+  .review-queue-table tr.review-group-row td { padding: 8px 10px; }
+}
