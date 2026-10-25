@@ -309,7 +309,17 @@ export async function cloudGuestLogin(examId, studentId) {
     p_student_id: studentId
   });
   if (claimError) {
-    return { ok: false, error: claimError.message || 'ยืนยันสิทธิ์เข้าสอบไม่สำเร็จ' };
+    const raw = String(claimError.message || '');
+    const friendly = raw.includes('exam not open')
+      ? 'ชุดสอบนี้ยังไม่เปิดหรือปิดรับคำตอบแล้ว กรุณาติดต่อครูผู้สอน'
+      : raw.includes('student not assigned')
+        ? 'ชื่อนี้ไม่ได้รับสิทธิ์เข้าสอบชุดนี้ กรุณาติดต่อครูผู้สอน'
+        : raw.includes('student not found')
+          ? 'ไม่พบข้อมูลนักเรียนคนนี้ในระบบ กรุณาติดต่อครูผู้สอน'
+          : raw.includes('exam not found')
+            ? 'ไม่พบชุดสอบนี้ในระบบกลาง กรุณาให้ครูตรวจสอบรหัสอีกครั้ง'
+            : raw || 'ยืนยันสิทธิ์เข้าสอบไม่สำเร็จ กรุณาลองใหม่';
+    return { ok: false, error: friendly };
   }
   current = { role: 'student', student_id: studentId, guest: true };
   const db = await loadCloudDB();

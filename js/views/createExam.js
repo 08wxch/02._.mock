@@ -977,7 +977,7 @@ export function createExamView(ctx) {
         navigate('/teacher/exams');
       });
 
-      root.querySelectorAll('[data-save-exam]').forEach(btn => btn.addEventListener('click', () => {
+      root.querySelectorAll('[data-save-exam]').forEach(btn => btn.addEventListener('click', async () => {
         syncDraft(root);
         updateSummary(root);
         updatePreview(root);
@@ -1028,6 +1028,7 @@ export function createExamView(ctx) {
           }
           const result = updateExam(sourceExam.id, payload, session);
           if (!result.ok) { toast(result.error || 'บันทึกไม่สำเร็จ', 'error'); return; }
+          await result.pending;
           draft = null;
           const message = mode === 'open'
             ? 'บันทึกและเปิดสอบแล้ว'
@@ -1057,7 +1058,7 @@ export function createExamView(ctx) {
         };
         exam.totalPoints = exam.questions.reduce((sum, q) => sum + Number(q.points), 0);
         db.exams.unshift(exam);
-        saveDB();
+        await saveDB();
         draft = null;
         const message = mode === 'open'
           ? `เปิดสอบแล้ว รหัส ${exam.code}`

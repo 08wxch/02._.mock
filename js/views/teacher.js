@@ -929,7 +929,7 @@ function bindExamActions(exam, session) {
     if (!ok) return;
     exam.status = 'saved';
     exam.savedAt = new Date().toISOString();
-    saveDB();
+    await saveDB();
     toast('เผยแพร่แล้ว ครูทุกคนเห็นชุดสอบนี้ได้', 'success');
     refreshRoute();
   }));
@@ -949,7 +949,7 @@ function bindExamActions(exam, session) {
     if (!exam.closeAt || new Date(exam.closeAt).getTime() <= Date.now()) {
       exam.closeAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
     }
-    saveDB();
+    await saveDB();
     toast('เปิดสอบแล้ว แจกรหัสให้นักเรียนได้เลย', 'success');
     refreshRoute();
   }));
@@ -963,7 +963,7 @@ function bindExamActions(exam, session) {
     });
     if (!ok) return;
     exam.status = 'closed';
-    saveDB();
+    await saveDB();
     toast('ปิดรับคำตอบแล้ว คุณยังสามารถตรวจและประกาศผลได้', 'warning');
     refreshRoute();
   }));

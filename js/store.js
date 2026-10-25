@@ -895,7 +895,9 @@ export function persist() {
 export function saveDB() {
   persist();
   window.dispatchEvent(new CustomEvent('examio:datachange'));
-  if (database) cloudSave(database);
+  // Returning the queue lets critical actions (opening an exam, adding a
+  // student) wait until the cloud snapshot is actually readable by students.
+  return database ? cloudSave(database) : Promise.resolve();
 }
 
 export function resetDB() {
@@ -1300,8 +1302,7 @@ export function updateExam(examId, updates = {}, actor = null) {
   if (!canEditExam(exam, actor)) return { ok: false, error: 'ชุดสอบนี้ตั้งค่าให้ดูได้อย่างเดียว หรือคุณไม่มีสิทธิ์แก้ไข' };
   Object.assign(exam, updates);
   exam.totalPoints = exam.questions.reduce((sum, q) => sum + Number(q.points || 0), 0);
-  saveDB();
-  return { ok: true, exam };
+  return { ok: true, exam, pending: saveDB() };
 }
 
 export function deleteExam(examId, actor = null) {
