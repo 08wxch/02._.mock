@@ -1475,7 +1475,7 @@ export function teacherReviewView(ctx) {
       <td colspan="6">
         <div class="review-group__inner">
           <span class="review-group__icon">${icon('file-text', 13)}</span>
-          <span class="review-group__copy"><strong>${e(exam.shortTitle || exam.title)}</strong><small>${e(orgNames)} · สร้างโดย ${e(creatorName)}${e(reviewerNote)} · ${stats.total} คำตอบ · ${stats.pending} รอตรวจ</small></span>
+          <span class="review-group__copy"><strong>${e(exam.shortTitle || exam.title)}</strong><small>สร้างโดย ${e(creatorName)}${e(reviewerNote)} · ${e(orgNames)} · ${stats.total} คำตอบ · ${stats.pending} รอตรวจ</small></span>
           <span class="review-group__code">${e(exam.code)}</span>
         </div>
       </td>
