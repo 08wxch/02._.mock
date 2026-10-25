@@ -1177,11 +1177,19 @@ export function generateStudentPassword() {
   return '123456';
 }
 
-export function generateStudentCode(db = getDB()) {
-  const used = new Set((db.students || []).map(student => String(student.code || '').trim()));
-  let next = 123456;
-  while (used.has(String(next))) next += 1;
-  return String(next);
+export function generateStudentCode(db = getDB(), org = null) {
+  const prefix = normalizeOrgShort(org?.shortName) || 'STU';
+  const globalCodes = new Set((db.students || []).map(student => String(student.code || '').trim().toUpperCase()));
+  const orgCodes = new Set((db.students || [])
+    .filter(student => !org || student.orgId === org.id)
+    .map(student => String(student.code || '').trim().toUpperCase()));
+  let next = 1;
+  let code;
+  do {
+    code = `${prefix}${String(next).padStart(4, '0')}`;
+    next += 1;
+  } while (orgCodes.has(code) || globalCodes.has(code));
+  return code;
 }
 
 export function addTeacher({ name, orgId, staffRole = 'teacher', code, password } = {}, actor = null) {

@@ -1790,10 +1790,10 @@ function openAddStudentModal(session, defaultOrgId = '') {
       <div class="field">
         <label for="new-student-code">รหัสนักเรียน</label>
         <div class="code-generate-row">
-          <input class="input input--lg" id="new-student-code" name="code" placeholder="เช่น 123456" autocomplete="off" value="${e(initial.code)}">
+          <input class="input input--lg" id="new-student-code" name="code" placeholder="เช่น SAT0001" autocomplete="off" value="${e(initial.code)}">
           <button class="btn btn--ghost" type="button" data-generate-student-code>${icon('key', 14)} สร้างรหัส</button>
         </div>
-        <span class="field__hint">ค่าเริ่มต้น = เลข 6 หลัก เริ่มที่ <strong>123456</strong> · ระบบเลื่อนเลขให้อัตโนมัติหากซ้ำ · แก้ไขได้</span>
+        <span class="field__hint">ค่าเริ่มต้น = ชื่อย่อหน่วยงาน + เลข 4 หลัก เริ่มที่ <strong>0001</strong> เช่น <strong>SAT0001</strong> · ระบบเลื่อนให้อัตโนมัติหากซ้ำ · แก้ไขได้</span>
       </div>
       <div class="field">
         <label for="new-student-password">รหัสผ่านเริ่มต้น</label>
