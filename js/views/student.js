@@ -605,7 +605,7 @@ function questionMarkup(exam, attempt, idx) {
       <span class="question-type-badge">${icon(questionTypeIcon(q.type), 13)} ${typeLabel(q.type)}</span>
     </div>
     <div class="question-body">
-      <h2 class="question-text">${mathText(q.text)}</h2>
+      ${q.text?.trim() ? `<h2 class="question-text">${mathText(q.text)}</h2>` : ''}
       ${questionImageHTML(q)}
       <div class="question-points">${icon('award', 12)} ${q.points} คะแนน · ${typeHint(q.type)}</div>
       ${answerArea}

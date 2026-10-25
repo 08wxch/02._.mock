@@ -86,6 +86,7 @@ function examToDraft(exam) {
     questions: (exam.questions || []).map(q => ({
       ...q,
       id: q.id || uid('q'),
+      text: q.text || '',
       options: q.type === 'mcq'
         ? defaultOptions().map((fallback, idx) => ({ ...fallback, ...(q.options?.[idx] || {}), id: fallback.id }))
         : defaultOptions(),
@@ -314,7 +315,7 @@ function updateParticipantState(root) {
 
 function previewHTML(question, index) {
   if (!question) return `<div class="live-preview__empty">${icon('edit', 18)}<span>เลือกข้อสอบเพื่อดูตัวอย่าง</span></div>`;
-  const text = question.text.trim() ? mathText(question.text) : '<span class="muted">พิมพ์โจทย์เพื่อดูตัวอย่าง</span>';
+  const text = question.text.trim() ? mathText(question.text) : question.image ? '' : '<span class="muted">พิมพ์โจทย์หรือแนบภาพเพื่อดูตัวอย่าง</span>';
   let body = '';
   if (question.type === 'mcq') {
     body = `<div class="live-preview__options">${question.options.map(opt => `<div class="live-preview__option ${question.correct === opt.id ? 'is-correct' : ''}">
@@ -373,7 +374,7 @@ function validateDraft(session) {
   if (draft.assignedStudentIds.some(id => !allowedStudents.has(id))) errors.push('ผู้เข้าสอบต้องเป็นนักเรียนในหน่วยงานเดียวกับชุดสอบ');
   if (!draft.questions.length) errors.push('ต้องมีคำถามอย่างน้อย 1 ข้อ');
   draft.questions.forEach((q, i) => {
-    if (!q.text.trim()) errors.push(`ข้อ ${i + 1}: ยังไม่ได้กรอกโจทย์`);
+    if (!q.text.trim() && !q.image) errors.push(`ข้อ ${i + 1}: ยังไม่ได้กรอกโจทย์หรือแนบภาพ`);
     if (!q.points || q.points <= 0) errors.push(`ข้อ ${i + 1}: คะแนนต้องมากกว่า 0`);
     if (q.type === 'mcq' && q.options.some(o => !o.text.trim())) errors.push(`ข้อ ${i + 1}: กรอกตัวเลือกให้ครบทั้ง 4 ข้อ`);
     if (q.type === 'short' && !q.acceptedAnswers.trim()) errors.push(`ข้อ ${i + 1}: กรุณากำหนดคำตอบที่ยอมรับอย่างน้อย 1 คำตอบ`);

@@ -3042,10 +3042,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .qb-image-upload.is-uploading { opacity: .65; pointer-events: none; }
 .qb-image-upload input[type="file"] {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 .qb-image-upload small { flex-basis: 100%; color: var(--muted); font-size: 8px; font-weight: 450; line-height: 1.5; }
 .qb-image-upload.is-uploading small { color: var(--blue, #4877f3); font-weight: 650; }

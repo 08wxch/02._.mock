@@ -438,7 +438,8 @@ export async function cloudUploadQuestionImage(blob) {
   if (!blob || !blob.size) return { ok: false, error: 'ไม่พบไฟล์รูปภาพ' };
   if (blob.size > 5 * 1024 * 1024) return { ok: false, error: 'รูปภาพต้องมีขนาดไม่เกิน 5 MB' };
   const type = blob.type || 'image/jpeg';
-  const path = `questions/${String(current.teacherId || 'teacher').replace(/[^A-Za-z0-9_-]/g, '')}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${imageExtension(type)}`;
+  const teacherKey = String(current.teacher_id || current.teacherId || 'teacher').replace(/[^A-Za-z0-9_-]/g, '');
+  const path = `questions/${teacherKey}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${imageExtension(type)}`;
   try {
     const supa = getClient();
     const { error } = await supa.storage.from(QUESTION_IMAGE_BUCKET).upload(path, blob, {
