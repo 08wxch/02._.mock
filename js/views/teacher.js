@@ -937,14 +937,15 @@ function bindExamActions(exam, session) {
     const openingDraft = exam.status === 'draft' || exam.status === 'saved';
     const ok = await confirmDialog({
       title: openingDraft ? 'เปิดสอบชุดนี้?' : 'เปิดสอบอีกครั้ง?',
-      message: `นักเรียนจะสามารถใช้รหัส ${exam.code} เพื่อเข้าสอบได้ตามวันและเวลาที่กำหนด`,
+      message: `นักเรียนจะสามารถใช้รหัส ${exam.code} เพื่อเข้าสอบได้ทันทีหลังยืนยัน`,
       confirmLabel: 'เปิดสอบ',
       iconName: 'play'
     });
     if (!ok) return;
     exam.status = 'open';
-    if (!openingDraft) exam.openAt = new Date().toISOString();
-    if (!exam.openAt) exam.openAt = new Date().toISOString();
+    // The “open exam” button always opens the room now. Previously a future
+    // openAt was kept for drafts, leaving students stuck at “not open yet”.
+    exam.openAt = new Date().toISOString();
     if (!exam.closeAt || new Date(exam.closeAt).getTime() <= Date.now()) {
       exam.closeAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
     }

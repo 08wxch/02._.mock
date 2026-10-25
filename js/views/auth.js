@@ -2,7 +2,7 @@ import { icon, brandMark } from '../icons.js';
 import { e, thaiDate, thaiTime, formatDuration } from '../utils.js';
 import { brand, toast, openModal, closeModal } from '../ui.js';
 import { getDB, setSession, clearSession, classIdsOf, studentClassLabel, replaceDB } from '../store.js';
-import { cloudLogin, cloudGuestLogin, cloudLogout } from '../cloud.js';
+import { cloudLogin, cloudGuestLogin, cloudLogout, cloudLookupExam } from '../cloud.js';
 import { navigate } from '../router.js';
 
 function authLiveStats(db = null) {
@@ -352,14 +352,28 @@ export function authView(ctx) {
     });
 
     // Exam code flow
-    page.querySelector('#code-form').addEventListener('submit', ev => {
+    page.querySelector('#code-form').addEventListener('submit', async ev => {
       ev.preventDefault();
       const code = codeValue();
       if (code.length !== 6) {
         setCodeError('กรุณากรอกครบทั้ง 6 หลัก');
         return;
       }
-      const exam = db.exams.find(x => x.code === code);
+      // The login page can be opened on a device that has never synced the
+      // latest exam list. Ask the public lookup endpoint first, then fall
+      // back to the local snapshot for offline/local mode.
+      const submitBtn = page.querySelector('#code-form button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      let remote = null;
+      try {
+        remote = await cloudLookupExam(code);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+      const localExam = db.exams.find(x => x.code === code);
+      const exam = remote
+        ? { ...remote, questions: Array.from({ length: Number(remote.questionCount) || 0 }) }
+        : localExam;
       if (!exam) {
         setCodeError('ไม่พบรหัสเข้าสอบนี้ กรุณาตรวจสอบอีกครั้ง');
         return;
@@ -373,7 +387,19 @@ export function authView(ctx) {
         setCodeError(message);
         return;
       }
-      const roster = db.students.filter(student => !Array.isArray(exam.assignedStudentIds) || exam.assignedStudentIds.includes(student.id));
+      const openTime = new Date(exam.openAt).getTime();
+      const closeTime = new Date(exam.closeAt).getTime();
+      if (!Number.isNaN(openTime) && Date.now() < openTime) {
+        setCodeError(`ชุดสอบนี้ยังไม่ถึงเวลาเปิด · เปิด ${thaiDate(exam.openAt)} เวลา ${thaiTime(exam.openAt)} น.`);
+        return;
+      }
+      if (!Number.isNaN(closeTime) && Date.now() > closeTime) {
+        setCodeError(`ชุดสอบนี้ปิดรับคำตอบแล้ว · ปิดเมื่อ ${thaiDate(exam.closeAt)} เวลา ${thaiTime(exam.closeAt)} น.`);
+        return;
+      }
+      const roster = remote
+        ? (Array.isArray(remote.roster) ? remote.roster : [])
+        : db.students.filter(student => !Array.isArray(exam.assignedStudentIds) || exam.assignedStudentIds.includes(student.id));
       if (!roster.length) {
         setCodeError('ชุดสอบนี้ยังไม่มีรายชื่อผู้เข้าสอบ กรุณาติดต่อครูผู้สอน');
         return;
@@ -386,12 +412,12 @@ export function authView(ctx) {
       roster.forEach(student => {
         const primaryId = classIdsOf(student)[0];
         const cls = db.classes.find(c => c.id === primaryId);
-        const code = cls?.code || student.class || 'ไม่ระบุ class';
+        const code = cls?.code || student.classLabel || student.class || 'ไม่ระบุ class';
         if (!byClass.has(code)) byClass.set(code, []);
         byClass.get(code).push(student);
       });
       const options = [...byClass.entries()].map(([code, list]) => `<optgroup label="${e(code)}">${list.map(student => {
-        const label = studentClassLabel(student, db);
+        const label = student.classLabel || studentClassLabel(student, db);
         const extra = label && label !== code ? ` · ${e(label)}` : '';
         return `<option value="${e(student.id)}">${e(student.name)} · ${e(student.code)}${extra}</option>`;
       }).join('')}</optgroup>`).join('');

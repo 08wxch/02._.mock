@@ -277,6 +277,19 @@ export async function cloudLogin(identifier, password) {
   return { ok: true, session: local, db };
 }
 
+export async function cloudLookupExam(code) {
+  if (!isCloudEnabled()) return null;
+  try {
+    const supa = getClient();
+    const { data, error } = await supa.rpc('public_exam_by_code', { p_code: String(code || '').trim() });
+    if (error) return null;
+    return data || null;
+  } catch (err) {
+    console.warn('Public exam lookup failed', err);
+    return null;
+  }
+}
+
 export async function cloudGuestLogin(examId, studentId) {
   if (!isCloudEnabled()) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
   const supa = getClient();

@@ -55,7 +55,7 @@ export function createExamDraft() {
     duration: 30,
     passPercent: 60,
     shareMode: 'view',
-    openAt: toDateTimeLocal(new Date(Date.now() + 5 * 60_000)),
+    openAt: toDateTimeLocal(new Date()),
     closeAt: toDateTimeLocal(new Date(Date.now() + 24 * 60 * 60_000)),
     assignedStudentIds: [],
     questions: [blankQuestion('mcq')]
@@ -1007,6 +1007,16 @@ export function createExamView(ctx) {
           assignedStudentIds: [...new Set(draft.assignedStudentIds)],
           questions: serializeQuestions()
         };
+
+        // Pressing “open exam” must make the exam enterable immediately.
+        // The old default start time was five minutes in the future, so a
+        // freshly opened exam still showed “not open yet” to students.
+        if (mode === 'open') {
+          payload.openAt = now.toISOString();
+          if (!payload.closeAt || new Date(payload.closeAt).getTime() <= now.getTime()) {
+            payload.closeAt = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString();
+          }
+        }
 
         if (isEdit) {
           if (mode === 'open') {
