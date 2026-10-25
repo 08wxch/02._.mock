@@ -25,7 +25,8 @@ import {
   updateStudentOrg, addTeacher, nextTeacherCode, generateStudentCode,
   generateStudentPassword, staffCodePrefix, updateTeacherOrg, removeTeacher,
   examOrganizationName, examOrganizationId, examOrganizationIds, setTeacherPassword, setTeacherCode, setStudentCode, setTeacherRole,
-  hasAllOrganizationAccess, canManageOrganizations, organizationAccessLevel
+  hasAllOrganizationAccess, canManageOrganizations, organizationAccessLevel,
+  visibleOrganizations, setOrganizationHidden
 } from '../store.js';
 import { cloudLogout } from '../cloud.js';
 import { mathText } from '../math.js';
@@ -314,8 +315,9 @@ export function teacherExamsView(ctx) {
     ? query.get('status')
     : (validStatuses.includes(savedFilters.status) ? savedFilters.status : 'all');
   const requestedOrg = query.has('org') ? query.get('org') : savedFilters.org;
+  const visibleOrgs = visibleOrganizations(session, db);
   const initialOrg = owner
-    ? (requestedOrg === 'all' || db.organizations.some(org => org.id === requestedOrg) ? requestedOrg || 'all' : 'all')
+    ? (requestedOrg === 'all' || visibleOrgs.some(org => org.id === requestedOrg) ? requestedOrg || 'all' : 'all')
     : (me?.orgId || 'all');
   const exams = [...visibleExams(session, db)].sort((a, b) => {
     const order = { open: 0, saved: 1, draft: 2, closed: 3, announced: 4 };
@@ -376,7 +378,6 @@ export function teacherExamsView(ctx) {
     </article>`;
   }).join('');
 
-  const visibleOrgs = owner ? db.organizations : db.organizations.filter(org => org.id === currentTeacher(session)?.orgId);
   const orgFilter = `<select class="select exam-org-filter" data-exam-org-filter aria-label="กรองชุดสอบตามหน่วยงาน">
     <option value="all">ทุกหน่วยงาน (${exams.length})</option>
     ${visibleOrgs.map(org => {
@@ -388,7 +389,7 @@ export function teacherExamsView(ctx) {
     <div>
       <div class="eyebrow">${icon('file-text', 12)} คลังข้อสอบ</div>
       <h1>ชุดสอบทั้งหมด</h1>
-      <p>${owner ? 'คุณเห็นชุดสอบทุกชุดของทุกหน่วยงาน · เลือกกรองตามโรงเรียนหรือหน่วยงานได้' : `ชุดสอบใน ${e(findOrganization(currentTeacher(session)?.orgId, db)?.name || 'หน่วยงานของคุณ')} เท่านั้น · ต่างหน่วยงานจะมองไม่เห็น`} · ${counts.all} ชุด</p>
+      <p>${owner ? 'ชุดสอบของทุกหน่วยงานที่คุณเข้าถึงได้ · เลือกกรองตามโรงเรียนหรือหน่วยงานได้' : `ชุดสอบใน ${e(findOrganization(currentTeacher(session)?.orgId, db)?.name || 'หน่วยงานของคุณ')} เท่านั้น · ต่างหน่วยงานจะมองไม่เห็น`} · ${counts.all} ชุด</p>
     </div>
     <div class="teacher-page-head__actions">
       <button class="btn btn--ghost" type="button" data-print>${icon('printer', 15)} พิมพ์รายการ</button>
@@ -1430,7 +1431,7 @@ export function teacherReviewView(ctx) {
     const stats = statsFor(exam);
     return `<option value="${e(exam.id)}" ${initialExam === exam.id ? 'selected' : ''}>${e(exam.shortTitle || exam.title)} · ${stats.pending} รอตรวจ / ${stats.total} คำตอบ</option>`;
   }).join('');
-  const orgOptions = db.organizations
+  const orgOptions = visibleOrganizations(session, db)
     .filter(org => all.some(x => examOrganizationIds(x.exam, db).includes(org.id)))
     .map(org => {
       const count = all.filter(x => examOrganizationIds(x.exam, db).includes(org.id)).length;
@@ -1653,7 +1654,8 @@ function openStudentClassesModal(studentId) {
 
 function openClassManager(session, initialOrgId = '') {
   const db = getDB();
-  const org = findOrganization(initialOrgId, db) || db.organizations.find(o => o.id === currentTeacher(session)?.orgId) || db.organizations[0];
+  const orgs = visibleOrganizations(session, db);
+  const org = findOrganization(initialOrgId, db) || orgs.find(o => o.id === currentTeacher(session)?.orgId) || orgs[0];
   if (!org) { toast('ยังไม่มีหน่วยงาน', 'error'); return; }
   const classes = db.classes.filter(cls => cls.orgId === org.id);
   const counts = new Map(classes.map(cls => [cls.id, studentsInClass(cls.id, db).length]));
@@ -1665,13 +1667,13 @@ function openClassManager(session, initialOrgId = '') {
       <div class="form-grid" style="margin-bottom:12px">
         <div class="field" style="margin:0"><label for="class-org-select">หน่วยงานของ class</label>
           <select class="select" id="class-org-select" data-class-org-select>
-            ${db.organizations.map(o => `<option value="${e(o.id)}" ${o.id === org.id ? 'selected' : ''}>${e(o.name)} · ${e(o.shortName)}</option>`).join('')}
+            ${orgs.map(o => `<option value="${e(o.id)}" ${o.id === org.id ? 'selected' : ''}>${e(o.name)} · ${e(o.shortName)}</option>`).join('')}
           </select>
         </div>
       </div>
       <label class="class-manager__scope">
         <input type="checkbox" data-class-all-orgs>
-        <span><strong>สร้างพร้อมกันทุกหน่วยงาน</strong><small>สร้าง class รหัสเดียวกันในทั้ง ${db.organizations.length} หน่วยงาน และข้ามหน่วยงานที่มี class นี้อยู่แล้ว</small></span>
+        <span><strong>สร้างพร้อมกันทุกหน่วยงาน</strong><small>สร้าง class รหัสเดียวกันในทั้ง ${orgs.length} หน่วยงาน และข้ามหน่วยงานที่มี class นี้อยู่แล้ว</small></span>
       </label>
       <div class="class-manager__add">
         <div class="field" style="margin:0;flex:1"><label for="new-class-code" data-class-add-label>สร้าง class ใหม่ใน ${e(org.name)}</label><input class="input" id="new-class-code" data-new-class-code maxlength="32" placeholder="เช่น CSCA-C, TAS-A1 หรือ รหัสที่คุณใช้จริง"></div>
@@ -1716,7 +1718,7 @@ function openClassManager(session, initialOrgId = '') {
       const syncScope = () => {
         const all = Boolean(allOrgs?.checked);
         if (orgSelect) orgSelect.disabled = all;
-        if (addLabel) addLabel.textContent = all ? `สร้าง class ใหม่ในทุกหน่วยงาน (${db.organizations.length})` : `สร้าง class ใหม่ใน ${org.name}`;
+        if (addLabel) addLabel.textContent = all ? `สร้าง class ใหม่ในทุกหน่วยงาน (${orgs.length})` : `สร้าง class ใหม่ใน ${org.name}`;
       };
       allOrgs?.addEventListener('change', syncScope);
       syncScope();
@@ -1760,8 +1762,9 @@ function studentCodeDefaults(org, db) {
 function openAddStudentModal(session, defaultOrgId = '') {
   const db = getDB();
   const owner = hasAllOrganizationAccess(session);
+  const orgs = visibleOrganizations(session, db);
   const defaultOrg = owner
-    ? (findOrganization(defaultOrgId, db) || findOrganization(currentTeacher(session)?.orgId, db) || db.organizations[0])
+    ? (findOrganization(defaultOrgId, db) || findOrganization(currentTeacher(session)?.orgId, db) || orgs[0])
     : findOrganization(currentTeacher(session)?.orgId, db);
   if (!defaultOrg) { toast('ยังไม่มีหน่วยงานสำหรับเพิ่มนักเรียน', 'error'); return; }
   let passwordTouched = false;
@@ -1770,7 +1773,7 @@ function openAddStudentModal(session, defaultOrgId = '') {
   let selectedClassIds = classes[0] ? [classes[0].id] : [];
   openModal({
     title: 'เพิ่มรายชื่อนักเรียน',
-    eyebrow: owner ? 'Wich · เลือกหน่วยงานได้' : `นักเรียนใหม่จะอยู่ใน ${defaultOrg.name}`,
+    eyebrow: owner ? (isOwnerTeacher(session) ? 'Wich · เลือกหน่วยงานได้' : 'เลือกหน่วยงานได้') : `นักเรียนใหม่จะอยู่ใน ${defaultOrg.name}`,
     size: 'sm',
     body: `<form id="add-student-form" novalidate>
       <div class="field">
@@ -1780,22 +1783,22 @@ function openAddStudentModal(session, defaultOrgId = '') {
       <div class="field">
         <label for="new-student-org">หน่วยงาน / โรงเรียน <span style="color:var(--coral)">*</span></label>
         ${owner ? `<select class="select input--lg" id="new-student-org" name="orgId">
-          ${db.organizations.map(org => `<option value="${e(org.id)}" ${org.id === defaultOrg.id ? 'selected' : ''}>${e(org.name)} · ${e(org.shortName)}</option>`).join('')}
+          ${orgs.map(org => `<option value="${e(org.id)}" ${org.id === defaultOrg.id ? 'selected' : ''}>${e(org.name)} · ${e(org.shortName)}</option>`).join('')}
         </select>` : `<div class="fixed-field">${icon('school', 15)}<strong>${e(defaultOrg.name)}</strong><span>${e(defaultOrg.shortName)}</span></div>`}
-        <span class="field__hint">${owner ? 'Wich เลือกหน่วยงานให้นักเรียนได้' : 'ครูสร้างนักเรียนในหน่วยงานของตนเองอัตโนมัติ ไม่ต้องเลือกโรงเรียน'}</span>
+        <span class="field__hint">${owner ? 'เลือกหน่วยงานให้นักเรียนได้' : 'ครูสร้างนักเรียนในหน่วยงานของตนเองอัตโนมัติ ไม่ต้องเลือกโรงเรียน'}</span>
       </div>
       <div class="field">
         <label for="new-student-code">รหัสนักเรียน</label>
         <div class="code-generate-row">
-          <input class="input input--lg" id="new-student-code" name="code" placeholder="เช่น SAT1001" autocomplete="off" value="${e(initial.code)}">
+          <input class="input input--lg" id="new-student-code" name="code" placeholder="เช่น 123456" autocomplete="off" value="${e(initial.code)}">
           <button class="btn btn--ghost" type="button" data-generate-student-code>${icon('key', 14)} สร้างรหัส</button>
         </div>
-        <span class="field__hint">ค่าเริ่มต้น = ชื่อย่อหน่วยงาน + เลข 4 หลัก เช่น SAT1001 · แก้ไขได้</span>
+        <span class="field__hint">ค่าเริ่มต้น = เลข 6 หลัก เริ่มที่ <strong>123456</strong> · ระบบเลื่อนเลขให้อัตโนมัติหากซ้ำ · แก้ไขได้</span>
       </div>
       <div class="field">
         <label for="new-student-password">รหัสผ่านเริ่มต้น</label>
         <input class="input input--lg" id="new-student-password" name="password" value="${e(initial.password)}" autocomplete="off">
-        <span class="field__hint">ค่าเริ่มต้น = รหัสนักเรียน · แก้ไขได้ และนักเรียนเปลี่ยนเองได้ภายหลัง</span>
+        <span class="field__hint">ค่าเริ่มต้น = <strong>123456</strong> · แก้ไขได้ และนักเรียนเปลี่ยนเองได้ภายหลัง</span>
       </div>
       <div class="field">
         <div class="field__label-row"><span class="field__label">class ของนักเรียน *</span><span class="field__hint">เลือกได้มากกว่า 1 class</span></div>
@@ -1896,7 +1899,7 @@ function openStudentCreatedModal(student, org) {
       <div class="teacher-created__hero">${avatar(student.name, student.id, 'lg')}<div><strong>${e(student.name)}</strong><span>${e(org?.name || 'ไม่ระบุหน่วยงาน')} · ${e(student.class || '')}</span></div></div>
       <div class="teacher-created__credential"><span>รหัสนักเรียน</span><strong>${e(student.code)}</strong><button class="icon-btn" type="button" data-copy="${e(student.code)}" aria-label="คัดลอกรหัสนักเรียน" title="คัดลอกรหัส">${icon('copy', 14)}</button></div>
       <div class="teacher-created__credential teacher-created__credential--soft"><span>รหัสผ่าน</span><strong>${e(student.password)}</strong><button class="icon-btn" type="button" data-copy="${e(student.password)}" aria-label="คัดลอกรหัสผ่าน" title="คัดลอกรหัสผ่าน">${icon('copy', 14)}</button></div>
-      <p class="teacher-created__hint">${icon('info', 14)} นักเรียนเข้าสู่ระบบด้วยรหัส <strong>${e(student.code)}</strong> และรหัสผ่านด้านบน · เปลี่ยนรหัสได้จากโปรไฟล์นักเรียน</p>
+      <p class="teacher-created__hint">${icon('info', 14)} นักเรียนเข้าสู่ระบบด้วยรหัส <strong>${e(student.code)}</strong> และรหัสผ่าน <strong>${e(student.password)}</strong> · เปลี่ยนรหัสได้จากโปรไฟล์นักเรียน</p>
     </div>`,
     footer: `<button class="btn btn--primary" type="button" data-modal-close>เสร็จสิ้น</button>`,
     onMount(overlay) {
@@ -1969,10 +1972,11 @@ function orgTypeLabel(org) {
   return org?.type === 'agency' ? 'หน่วยงาน' : 'โรงเรียน';
 }
 
-function organizationCards(db, canManage = false, myOrgId = '') {
+function organizationCards(db, canManage = false, myOrgId = '', session = null) {
   if (!canManage) return '';
   const ownerOrgId = db.teachers.find(t => t.isOwner && !t.deletedAt)?.orgId;
-  const cards = db.organizations.map(org => {
+  const owner = isOwnerTeacher(session);
+  const cards = visibleOrganizations(session, db).map(org => {
     const staffCount = db.teachers.filter(t => !t.deletedAt && t.orgId === org.id).length;
     const studentCount = db.students.filter(s => s.orgId === org.id).length;
     const canDelete = org.id !== ownerOrgId && org.id !== myOrgId;
@@ -1990,6 +1994,10 @@ function organizationCards(db, canManage = false, myOrgId = '') {
       </div>
       <div class="org-card__stats"><span>${icon('users', 11)} ${staffCount} คน</span><span>${icon('graduation-cap', 11)} ${studentCount} นักเรียน</span></div>
       <div class="org-card__hint">${icon('key', 10)} รหัสหน้า: ${e(org.shortName)} · ${e(access)}${org.id === ownerOrgId ? ' · หน่วยงานของ Wich' : org.id === myOrgId ? ' · หน่วยงานของคุณ' : ''}</div>
+      ${owner ? `<label class="org-hidden-toggle" title="ซ่อนหน่วยงานนี้จากบัญชีที่เห็นทุกหน่วยงาน (Wich ยังเห็นเสมอ)">
+        <input type="checkbox" data-org-hidden="${e(org.id)}" ${org.hiddenFromGlobal ? 'checked' : ''}>
+        <span>ไม่สามารถมองเห็นได้</span>
+      </label>` : ''}
     </article>`;
   }).join('');
   return `<section class="org-section">
@@ -2009,17 +2017,13 @@ export function teacherStaffView(ctx) {
   const canManageOrgs = canManageOrganizations(session);
   const manager = isManagerStaff(session) || canManageOrgs;
   const me = currentTeacher(session);
+  const orgs = visibleOrganizations(session, db);
+  const activeTeachers = visibleStaff(session, db, 'all');
   const requestedOrg = ctx.query?.get?.('org') || '';
-  const orgFilter = globalAccess ? (db.organizations.some(o => o.id === requestedOrg) ? requestedOrg : 'all') : me.orgId;
+  const orgFilter = globalAccess ? (orgs.some(o => o.id === requestedOrg) ? requestedOrg : 'all') : me.orgId;
   const teachers = visibleStaff(session, db, orgFilter);
-  const activeTeachers = db.teachers.filter(t => !t.deletedAt);
-  const orgs = globalAccess ? db.organizations : db.organizations.filter(o => o.id === me.orgId);
-  const scopedStudents = globalAccess
-    ? db.students.filter(s => orgFilter === 'all' || s.orgId === orgFilter)
-    : db.students.filter(s => s.orgId === me.orgId);
-  const scopedClasses = globalAccess
-    ? db.classes.filter(c => orgFilter === 'all' || c.orgId === orgFilter)
-    : db.classes.filter(c => c.orgId === me.orgId);
+  const scopedStudents = visibleStudents(session, db, orgFilter);
+  const scopedClasses = visibleClasses(session, db, orgFilter);
   const cards = teachers.map(t => {
     const org = findOrganization(t.orgId, db);
     const examCount = db.exams.filter(exam => exam.teacherId === t.id).length;
@@ -2048,16 +2052,17 @@ export function teacherStaffView(ctx) {
 
   const filterSelect = globalAccess ? `<select class="select" data-staff-org-filter aria-label="กรองตามหน่วยงาน">
     <option value="all">ทุกหน่วยงาน (${activeTeachers.length})</option>
-    ${db.organizations.map(org => `<option value="${e(org.id)}" ${orgFilter === org.id ? 'selected' : ''}>${e(org.name)} (${activeTeachers.filter(t => t.orgId === org.id).length})</option>`).join('')}
+    ${orgs.map(org => `<option value="${e(org.id)}" ${orgFilter === org.id ? 'selected' : ''}>${e(org.name)} (${activeTeachers.filter(t => t.orgId === org.id).length})</option>`).join('')}
   </select>` : '';
   const scopeName = orgFilter === 'all' ? 'ทุกหน่วยงาน' : findOrganization(orgFilter, db)?.name || 'หน่วยงาน';
+  const myOrg = findOrganization(me?.orgId, db);
   const content = `<div class="teacher-page-head">
-    <div><div class="eyebrow">${icon('school', 12)} การจัดการทีม</div><h1>ครูและบุคลากร</h1><p>${canManageOrgs ? 'เห็นทุกหน่วยงาน สร้าง/ลบหน่วยงาน และจัดการบุคลากรได้ทุกหน่วยงาน' : manager ? `ผู้จัดการเพิ่มหรือลบครูได้เฉพาะใน ${e(scopeName)} · สร้างได้เฉพาะบัญชีครู` : `บุคลากรใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว`}</p></div>
+    <div><div class="eyebrow">${icon('school', 12)} การจัดการทีม</div><h1>ครูและบุคลากร</h1><p>${globalAccess ? `${e(myOrg?.name || 'หน่วยงานของฉัน')} · ${e(myOrg?.shortName || '—')}` : manager ? `ผู้จัดการเพิ่มหรือลบครูได้เฉพาะใน ${e(scopeName)} · สร้างได้เฉพาะบัญชีครู` : `บุคลากรใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว`}</p></div>
     <div class="teacher-page-head__actions">
       ${owner || canManageOrgs ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} สร้างบัญชีครู / ผู้จัดการ</button>` : manager ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} เพิ่มครูในหน่วยงาน</button>` : `<span class="badge badge--neutral">${icon('eye', 11)} อ่านอย่างเดียว</span>`}
     </div>
   </div>
-  ${canManageOrgs ? organizationCards(db, canManageOrgs, me?.orgId) : `<div class="notice-strip notice-strip--info" style="margin-bottom:14px">${icon('school', 15)}<span><strong>${e(scopeName)}</strong> · ชื่อย่อ ${e(findOrganization(me.orgId, db)?.shortName || '—')}</span></div>`}
+  ${canManageOrgs ? organizationCards(db, canManageOrgs, me?.orgId, session) : `<div class="notice-strip notice-strip--info" style="margin-bottom:14px">${icon('school', 15)}<span><strong>${e(scopeName)}</strong> · ชื่อย่อ ${e(findOrganization(me.orgId, db)?.shortName || '—')}</span></div>`}
   <div class="staff-summary">
     <div class="overview-metric"><span>${icon('users', 11)} ครูและบุคลากร</span><strong>${teachers.length} <small>คน</small></strong></div>
     <div class="overview-metric"><span>${icon('school', 11)} หน่วยงานที่เห็น</span><strong>${orgFilter === 'all' ? orgs.length : 1} <small>แห่ง</small></strong></div>
@@ -2071,7 +2076,7 @@ export function teacherStaffView(ctx) {
     html: teacherShell(session, { active: 'staff', crumb: 'ครูและบุคลากร', content }),
     mount() {
       mountTeacherShell(session);
-      document.querySelector('[data-create-teacher]')?.addEventListener('click', () => openCreateTeacherModal(session, orgFilter === 'all' ? db.organizations[0]?.id : orgFilter));
+      document.querySelector('[data-create-teacher]')?.addEventListener('click', () => openCreateTeacherModal(session, orgFilter === 'all' ? orgs[0]?.id : orgFilter));
       document.querySelector('[data-create-org]')?.addEventListener('click', () => openOrganizationModal(null, session));
       document.querySelectorAll('[data-edit-org]').forEach(btn => btn.addEventListener('click', () => {
         const org = db.organizations.find(o => o.id === btn.dataset.editOrg);
@@ -2095,6 +2100,16 @@ export function teacherStaffView(ctx) {
         const result = deleteOrganization(org.id, session);
         if (!result.ok) { toast(result.error || 'ลบหน่วยงานไม่สำเร็จ', 'error'); return; }
         toast(`ลบ ${org.name} และข้อมูลในหน่วยงานแล้ว`, 'warning');
+        refreshRoute();
+      }));
+      document.querySelectorAll('[data-org-hidden]').forEach(input => input.addEventListener('change', () => {
+        const result = setOrganizationHidden(input.dataset.orgHidden, input.checked, session);
+        if (!result.ok) {
+          input.checked = !input.checked;
+          toast(result.error || 'บันทึกการมองเห็นไม่สำเร็จ', 'error');
+          return;
+        }
+        toast(input.checked ? 'ซ่อนหน่วยงานจากบัญชีที่เห็นทุกหน่วยงานแล้ว' : 'เปิดให้บัญชีที่เห็นทุกหน่วยงานมองเห็นแล้ว', 'success');
         refreshRoute();
       }));
       document.querySelectorAll('[data-staff-open]').forEach(btn => btn.addEventListener('click', () => openStaffDetailModal(btn.dataset.staffOpen, session)));
@@ -2215,7 +2230,7 @@ function openStaffDetailModal(teacherId, session) {
       ${canMove ? `<form class="staff-move-form" data-staff-move-form>
         <div class="field"><label for="staff-move-org">ย้ายหน่วยงาน / โรงเรียน</label>
           <select class="select" id="staff-move-org" name="orgId">
-            ${db.organizations.map(o => `<option value="${e(o.id)}" ${o.id === teacher.orgId ? 'selected' : ''}>${e(o.name)} · ${e(o.shortName)}</option>`).join('')}
+            ${(owner ? db.organizations : visibleOrganizations(session, db)).map(o => `<option value="${e(o.id)}" ${o.id === teacher.orgId ? 'selected' : ''}>${e(o.name)} · ${e(o.shortName)}</option>`).join('')}
           </select>
           <span class="field__hint">${icon('alert-triangle', 11)} การย้ายจะย้ายชุดสอบที่ครูคนนี้สร้างไปยังหน่วยงานใหม่ด้วย</span>
         </div>
@@ -2360,7 +2375,7 @@ function openCreateTeacherModal(session, defaultOrgId = '') {
   const manager = isManagerStaff(session);
   if (!admin && !manager) { toast('คุณไม่มีสิทธิ์สร้างบัญชีครู', 'error'); return; }
   const me = currentTeacher(session);
-  const orgs = admin ? db.organizations : db.organizations.filter(o => o.id === me?.orgId);
+  const orgs = admin ? visibleOrganizations(session, db) : db.organizations.filter(o => o.id === me?.orgId);
   if (!orgs.length) { toast('สร้างหน่วยงานก่อนเพิ่มบัญชีครู', 'error'); return; }
   const initialOrg = findOrganization(defaultOrgId, db) || orgs[0];
   const initialRole = 'teacher';
@@ -2534,7 +2549,8 @@ export function teacherStudentsView(ctx) {
   const manager = isManagerStaff(session);
   const me = currentTeacher(session);
   const requestedOrg = ctx.query?.get?.('org') || '';
-  const orgFilter = owner ? (db.organizations.some(o => o.id === requestedOrg) ? requestedOrg : 'all') : me.orgId;
+  const visibleOrgs = visibleOrganizations(session, db);
+  const orgFilter = owner ? (visibleOrgs.some(o => o.id === requestedOrg) ? requestedOrg : 'all') : me.orgId;
   const students = [...visibleStudents(session, db, orgFilter)].sort((a, b) => a.name.localeCompare(b.name, 'th'));
   const classes = visibleClasses(session, db, orgFilter);
   const classCounts = new Map(classes.map(cls => [cls.id, studentsInClass(cls.id, db).filter(student => students.some(s => s.id === student.id)).length]));
@@ -2577,13 +2593,14 @@ export function teacherStudentsView(ctx) {
       </div>
     </article>`;
   }).join('');
+  const visibleAllStudents = visibleStudents(session, db, 'all');
   const orgSelect = owner ? `<select class="select" data-student-org-filter aria-label="กรองตามหน่วยงาน">
-    <option value="all">ทุกหน่วยงาน (${db.students.length})</option>
-    ${db.organizations.map(org => `<option value="${e(org.id)}" ${orgFilter === org.id ? 'selected' : ''}>${e(org.name)} (${db.students.filter(s => s.orgId === org.id).length})</option>`).join('')}
+    <option value="all">ทุกหน่วยงาน (${visibleAllStudents.length})</option>
+    ${visibleOrgs.map(org => `<option value="${e(org.id)}" ${orgFilter === org.id ? 'selected' : ''}>${e(org.name)} (${visibleAllStudents.filter(s => s.orgId === org.id).length})</option>`).join('')}
   </select>` : '';
   const scopeName = orgFilter === 'all' ? 'ทุกหน่วยงาน' : organizationName(orgFilter, db);
   const content = `<div class="teacher-page-head">
-    <div><div class="eyebrow">${icon('users', 12)} ทะเบียนนักเรียน</div><h1>นักเรียน</h1><p>${owner ? 'เห็นนักเรียนทุกหน่วยงานและเลือกกรองตามโรงเรียน/หน่วยงานได้ · คลิกนามบัตรเพื่อดูผลสอบรายชุด' : `เพิ่มนักเรียนและกำหนด class ใน ${e(scopeName)} · นักเรียนใหม่จะอยู่ในหน่วยงานของคุณอัตโนมัติ`}</p></div>
+    <div><div class="eyebrow">${icon('users', 12)} ทะเบียนนักเรียน</div><h1>นักเรียน</h1><p>${owner ? 'นักเรียนในทุกหน่วยงานที่คุณเข้าถึงได้ · เลือกกรองตามโรงเรียน/หน่วยงาน · คลิกนามบัตรเพื่อดูผลสอบรายชุด' : `เพิ่มนักเรียนและกำหนด class ใน ${e(scopeName)} · นักเรียนใหม่จะอยู่ในหน่วยงานของคุณอัตโนมัติ`}</p></div>
     <div class="teacher-page-head__actions">
       <button class="btn btn--ghost" type="button" data-export-students>${icon('download', 15)} ส่งออก Excel</button>
       ${owner ? `<button class="btn btn--ghost" type="button" data-manage-classes>${icon('graduation-cap', 15)} จัดการ class</button>` : ''}

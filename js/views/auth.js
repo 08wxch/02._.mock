@@ -100,6 +100,7 @@ function studentPanel() {
       <div class="field">
         <label for="student-password">รหัสผ่าน</label>
         <div class="input-with-icon">${icon('lock', 17)}<input class="input input--lg" id="student-password" name="password" type="password" placeholder="••••••" autocomplete="current-password" value=""></div>
+        <span class="field__hint">รหัสนักเรียนและรหัสผ่านเริ่มต้นของนักเรียนใหม่เริ่มที่ <strong>123456</strong> · เปลี่ยนรหัสผ่านได้จากโปรไฟล์หลังเข้าสู่ระบบ</span>
       </div>
       <div class="form-error" data-account-error>${icon('alert-circle', 15)}<span></span></div>
       <button class="btn btn--primary btn--wide btn--lg auth-submit" type="submit">${icon('arrow-right', 17)} เข้าสู่ระบบ</button>

@@ -588,14 +588,15 @@ function questionMarkup(exam, attempt, idx) {
     </div>`;
   } else if (q.type === 'short') {
     answerArea = `<div class="short-answer-wrap">
-      <div class="answer-field-label"><span>คำตอบของคุณ</span><span>กรอกคำตอบให้กระชับ</span></div>
-      <input class="input" id="answer-${q.id}" data-answer-input="${q.id}" type="text" placeholder="พิมพ์คำตอบที่นี่..." value="${e(value)}" autocomplete="off" maxlength="120">
+      <div class="answer-field-label"><span>คำตอบของคุณ</span><span>พิมพ์ข้อความหรือ LaTeX ได้</span></div>
+      <input class="input" id="answer-${q.id}" data-answer-input="${q.id}" type="text" placeholder="พิมพ์คำตอบ หรือสมการ เช่น $x=2$" value="${e(value)}" autocomplete="off" maxlength="120">
+      <div class="answer-latex-hint">${icon('info', 11)} ใช้ $...$ ครอบสมการ เช่น $x^2+1$ หรือ $\\frac{1}{2}$</div>
     </div>`;
   } else {
     answerArea = `<div class="essay-wrap">
-      <div class="answer-field-label"><span>เขียนคำตอบของคุณ</span><span>ครูจะตรวจคำตอบนี้ด้วยตนเอง</span></div>
-      <textarea class="textarea" id="answer-${q.id}" data-answer-input="${q.id}" placeholder="อธิบายขั้นตอนและคำตอบของคุณ..." maxlength="1500">${e(value)}</textarea>
-      <div class="essay-toolbar"><span>${icon('info', 12)} เขียนให้ครบถ้วนเพื่อคะแนนที่ดีที่สุด</span><span data-char-count="${q.id}">${value.length} / 1500</span></div>
+      <div class="answer-field-label"><span>เขียนคำตอบของคุณ</span><span>ครูจะตรวจเอง · พิมพ์ LaTeX ได้</span></div>
+      <textarea class="textarea" id="answer-${q.id}" data-answer-input="${q.id}" placeholder="อธิบายขั้นตอนและคำตอบของคุณ... ใช้ $...$ ครอบสมการได้" maxlength="1500">${e(value)}</textarea>
+      <div class="essay-toolbar"><span>${icon('info', 12)} เขียนให้ครบถ้วน · ใช้ $...$ สำหรับสมการ</span><span data-char-count="${q.id}">${value.length} / 1500</span></div>
     </div>`;
   }
 

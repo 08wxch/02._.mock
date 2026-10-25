@@ -3221,3 +3221,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .teacher-comment-list { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
 .teacher-comment--summary { margin-top: 0; }
 .teacher-comment--summary strong { color: #6a5223; }
+
+/* Organization visibility control */
+.org-hidden-toggle {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border: 1px dashed #e3d6bd; border-radius: 7px; background: #fdfaf3;
+  font-size: 8px; color: #75602e; cursor: pointer;
+}
+.org-hidden-toggle input { width: 13px; height: 13px; accent-color: var(--amber); margin: 0; flex: 0 0 auto; }
+.org-hidden-toggle:has(input:checked) { background: #fbefd8; border-style: solid; }
+
+/* Student answer LaTeX guidance */
+.answer-latex-hint {
+  display: flex; align-items: flex-start; gap: 5px; margin-top: 6px;
+  font-size: 7.8px; line-height: 1.5; color: var(--muted);
+}

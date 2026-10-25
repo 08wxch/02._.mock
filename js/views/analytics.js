@@ -5,7 +5,7 @@ import {
   getDB, currentTeacher, isOwnerTeacher, visibleStudents,
   visibleExams, canViewExamStats, classIdsOf, studentClassLabel,
   attemptScore, examOrganizationId, examOrganizationIds, findOrganization,
-  hasAllOrganizationAccess
+  hasAllOrganizationAccess, visibleOrganizations, visibleClasses
 } from '../store.js';
 import { navigate } from '../router.js';
 import { teacherShell, mountTeacherShell } from './teacher.js';
@@ -22,14 +22,15 @@ function scopeFor(ctx) {
   if (!me) return { denied: true };
 
   const requestedOrg = queryValue(ctx, 'org');
+  const orgs = visibleOrganizations(session, db);
   const orgId = owner
-    ? (db.organizations.some(org => org.id === requestedOrg) ? requestedOrg : 'all')
+    ? (orgs.some(org => org.id === requestedOrg) ? requestedOrg : 'all')
     : me.orgId;
-  const orgClasses = db.classes.filter(cls => orgId === 'all' || cls.orgId === orgId);
+  const orgClasses = visibleClasses(session, db).filter(cls => orgId === 'all' || cls.orgId === orgId);
   const requestedClass = queryValue(ctx, 'class');
   const classId = orgClasses.some(cls => cls.id === requestedClass) ? requestedClass : 'all';
   const classes = orgClasses;
-  const orgIds = new Set((orgId === 'all' ? db.organizations : db.organizations.filter(org => org.id === orgId)).map(org => org.id));
+  const orgIds = new Set((orgId === 'all' ? orgs : orgs.filter(org => org.id === orgId)).map(org => org.id));
 
   const students = visibleStudents(session, db).filter(student =>
     orgIds.has(student.orgId) && (classId === 'all' || classIdsOf(student).includes(classId))
@@ -173,7 +174,7 @@ function scopeFor(ctx) {
   const classLabel = classId === 'all' ? 'ทุก class' : classes.find(cls => cls.id === classId)?.code || 'class';
 
   return {
-    db, session, owner, me, orgId, classId, classes, students, exams, attempts, scored,
+    db, session, owner, me, orgs, orgId, classId, classes, students, exams, attempts, scored,
     average, passRate, passCount: passed, highest,
     studentRows, topics, classStats, examTrend, distributionBands, orgLabel, classLabel
   };
@@ -189,7 +190,7 @@ function filterQuery(scope, overrides = {}) {
 }
 
 function filtersHTML(scope, { ranking = false } = {}) {
-  const { db, owner, orgId, classId, classes } = scope;
+  const { db, owner, orgs, orgId, classId, classes } = scope;
   const classOptions = classes.map(cls => {
     const org = findOrganization(cls.orgId, db);
     const label = orgId === 'all' ? `${cls.code} · ${org?.shortName || org?.name || ''}` : cls.code;
@@ -199,7 +200,7 @@ function filtersHTML(scope, { ranking = false } = {}) {
     ${owner ? `<div class="field"><label for="analytics-org">หน่วยงาน / โรงเรียน</label>
       <select class="select" id="analytics-org" name="org">
         <option value="all" ${orgId === 'all' ? 'selected' : ''}>ทุกหน่วยงาน</option>
-        ${db.organizations.map(org => `<option value="${e(org.id)}" ${org.id === orgId ? 'selected' : ''}>${e(org.name)} · ${e(org.shortName)}</option>`).join('')}
+        ${orgs.map(org => `<option value="${e(org.id)}" ${org.id === orgId ? 'selected' : ''}>${e(org.name)} · ${e(org.shortName)}</option>`).join('')}
       </select>
     </div>` : `<div class="field"><label>หน่วยงาน / โรงเรียน</label><div class="fixed-field">${icon('school', 15)}<strong>${e(findOrganization(scope.me.orgId, db)?.name || 'หน่วยงานของฉัน')}</strong><span>กำหนดตามบัญชี</span></div></div>`}
     <div class="field"><label for="analytics-class">class</label>
