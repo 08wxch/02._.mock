@@ -976,6 +976,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .exam-timer.is-warning .exam-timer__copy strong { animation: timer-pulse 1s ease-in-out infinite; }
 @keyframes timer-pulse { 50% { opacity: .45; } }
 .exam-topbar__progress { height: 2px; background: #efefef; }
+.preview-mode-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 10px; border-radius: 9px;
+  background: var(--mint-soft); color: var(--pine);
+  border: 1px solid #e4e4e4; font-size: 10px; font-weight: 600;
+  white-space: nowrap;
+}
+.preview-mode-pill .icon { color: var(--pine); }
+.preview-back { white-space: nowrap; }
+.preview-app .exam-topbar__center { margin-left: auto; }
 .exam-topbar__progress span { display: block; height: 100%; background: var(--coral); transition: width .35s ease; }
 .exam-layout {
   width: min(1170px, calc(100% - 40px)); margin: 0 auto;
@@ -1906,6 +1916,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .exam-timer__icon { width: 23px; height: 23px; }
   .exam-timer__copy strong { font-size: 14px; }
   .exam-topbar__submit { min-height: 37px; font-size: 11px; padding: 7px 11px; }
+  .preview-mode-pill { font-size: 9px; padding: 6px 8px; }
   .question-card__top { padding: 15px 19px 0; }
   .question-body { padding: 16px 19px 20px; }
   .question-foot { padding: 12px 19px; }

@@ -3,7 +3,7 @@ import { cloudSetPassword, cloudGetPassword } from '../cloud.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, shortThaiDate, longThaiDate,
   relativeTime, formatNumber, formatStopwatch, percent, clamp,
-  typeLabel, downloadFile, csvCell, makePrintHeader, statusMeta, copyText
+  typeLabel, typeHint, downloadFile, csvCell, makePrintHeader, statusMeta, copyText
 } from '../utils.js';
 import {
   brand, avatar, badge, toast, openModal, closeModal, confirmDialog,
@@ -492,6 +492,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
     </div>
     <div class="exam-admin-head__actions">
       ${canRemind && metrics.pendingReview ? `<button class="btn btn--ghost" type="button" data-remind-exam>${icon('bell', 15)} แจ้งเตือนครู</button>` : ''}
+      ${canEdit ? `<a class="btn btn--ghost" href="#/teacher/exam/${exam.id}/preview">${icon('eye', 15)} พรีวิวข้อสอบ</a>` : ''}
       ${canEdit ? `<a class="icon-btn" href="#/teacher/exam/${exam.id}/edit" title="แก้ไขชุดสอบ" aria-label="แก้ไขชุดสอบ">${icon('edit', 15)}</a>` : ''}
       ${canManage ? `<button class="icon-btn icon-btn--danger" type="button" data-delete-exam="${exam.id}" title="ลบชุดสอบ" aria-label="ลบชุดสอบ">${icon('trash', 15)}</button>` : ''}
       ${!canEdit ? `<span class="exam-readonly-note">${icon(canReview ? 'clipboard-check' : 'eye', 13)} ${canReview ? 'อ่านข้อมูล · ตรวจคำตอบได้' : 'ดูข้อมูลจากเจ้าของชุดสอบ'}</span>` : !canManage ? `<span class="exam-readonly-note">${icon('edit', 13)} แก้ไขร่วม · เปลี่ยนสถานะไม่ได้</span>` : exam.status === 'draft'
@@ -1214,6 +1215,248 @@ function bindGradingTab(exam) {
     toast(`บันทึกคะแนนของ ${attempt.studentName} แล้ว`, 'success');
     refreshRoute();
   }));
+}
+
+function previewQuestionTypeIcon(type) {
+  return ({ mcq: 'list-checks', truefalse: 'check-circle', short: 'edit', essay: 'file-text' })[type] || 'file-text';
+}
+
+function previewQuestionMarkup(exam, state, idx) {
+  const q = exam.questions[idx];
+  const value = state.answers[q.id] ?? '';
+  const flagged = Boolean(state.flags[q.id]);
+  const last = idx === exam.questions.length - 1;
+  let answerArea = '';
+
+  if (q.type === 'mcq') {
+    answerArea = `<div class="answer-options" role="group" aria-label="ตัวเลือกคำตอบ">
+      ${(q.options || []).map(option => {
+        const active = String(value) === String(option.id);
+        return `<button type="button" class="answer-option ${active ? 'is-selected' : ''} ${option.image ? 'answer-option--has-image' : ''}" data-preview-option="${e(option.id)}" aria-pressed="${active}">
+          <span class="answer-option__key">${e(option.id)}</span>
+          <span class="answer-option__text">${option.text?.trim() ? mathText(option.text) : ''}${optionImageHTML(option, 'answer-option__image')}</span>
+          <span class="answer-option__check">${icon('check-circle', 16)}<span>เลือกแล้ว</span></span>
+        </button>`;
+      }).join('')}
+    </div>`;
+  } else if (q.type === 'truefalse') {
+    answerArea = `<div class="tf-options" role="group" aria-label="เลือกถูกหรือผิด">
+      ${[{ v: 'true', label: 'ถูกต้อง', sub: 'ข้อความนี้เป็นจริง', ic: 'check' }, { v: 'false', label: 'ไม่ถูกต้อง', sub: 'ข้อความนี้เป็นเท็จ', ic: 'x' }].map(opt => {
+        const active = String(value) === opt.v;
+        return `<button type="button" class="tf-option ${active ? 'is-selected' : ''}" data-preview-tf="${opt.v}" aria-pressed="${active}">
+          <span class="tf-option__icon">${icon(opt.ic, 21)}</span>
+          <strong>${opt.label}</strong>
+          <span>${opt.sub}</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+  } else if (q.type === 'short') {
+    answerArea = `<div class="short-answer-wrap">
+      <div class="answer-field-label"><span>คำตอบของคุณ</span><span>พิมพ์ข้อความหรือ LaTeX ได้</span></div>
+      <input class="input" type="text" data-preview-input="${q.id}" placeholder="พิมพ์คำตอบ หรือสมการ เช่น $x=2$" value="${e(value)}" autocomplete="off" maxlength="120">
+      <div class="answer-latex-hint">${icon('info', 11)} ใช้ $...$ ครอบสมการ เช่น $x^2+1$ หรือ $\\frac{1}{2}$</div>
+    </div>`;
+  } else {
+    answerArea = `<div class="essay-wrap">
+      <div class="answer-field-label"><span>เขียนคำตอบของคุณ</span><span>ครูจะตรวจเอง · พิมพ์ LaTeX ได้</span></div>
+      <textarea class="textarea" data-preview-input="${q.id}" placeholder="อธิบายขั้นตอนและคำตอบของคุณ... ใช้ $...$ ครอบสมการได้" maxlength="1500">${e(value)}</textarea>
+      <div class="essay-toolbar"><span>${icon('info', 12)} เขียนให้ครบถ้วน · ใช้ $...$ สำหรับสมการ</span><span data-preview-char>${String(value).length} / 1500</span></div>
+    </div>`;
+  }
+
+  return `<article class="question-card preview-question-card" data-preview-qid="${q.id}">
+    <div class="question-card__top">
+      <div class="question-index">ข้อ <strong>${String(idx + 1).padStart(2, '0')}</strong> <span>/ ${exam.questions.length}</span></div>
+      <span class="question-type-badge">${icon(previewQuestionTypeIcon(q.type), 13)} ${typeLabel(q.type)}</span>
+    </div>
+    <div class="question-body">
+      ${q.text?.trim() ? `<h2 class="question-text">${mathText(q.text)}</h2>` : ''}
+      ${questionImageHTML(q)}
+      <div class="question-points">${icon('award', 12)} ${q.points} คะแนน · ${typeHint(q.type)}</div>
+      ${answerArea}
+    </div>
+    <div class="question-foot">
+      <button type="button" class="flag-btn ${flagged ? 'is-flagged' : ''}" data-preview-flag aria-pressed="${flagged}">
+        ${icon('flag', 16)}<span>${flagged ? 'ทำเครื่องหมายไว้แล้ว' : 'ทำเครื่องหมายข้อนี้ไว้ก่อน'}</span>
+      </button>
+      <div class="question-nav">
+        <button type="button" class="btn btn--ghost" data-preview-prev ${idx === 0 ? 'disabled' : ''}>${icon('arrow-left', 15)} ก่อนหน้า</button>
+        ${last
+          ? `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/overview">จบการพรีวิว ${icon('check', 15)}</a>`
+          : `<button type="button" class="btn btn--primary" data-preview-next>ข้อถัดไป ${icon('arrow-right', 15)}</button>`}
+      </div>
+    </div>
+  </article>`;
+}
+
+function previewMapMarkup(exam, state, idx) {
+  return exam.questions.map((q, i) => {
+    const value = state.answers[q.id];
+    const answered = value !== undefined && value !== '';
+    const flagged = Boolean(state.flags[q.id]);
+    const current = i === idx;
+    const classes = ['map-num'];
+    if (answered) classes.push('is-answered');
+    if (flagged) classes.push('is-flagged');
+    if (current) classes.push('is-current');
+    return `<button type="button" class="${classes.join(' ')}" data-preview-map="${i}" aria-label="ไปข้อ ${i + 1}${answered ? ' ตอบแล้ว' : ' ยังไม่ตอบ'}" aria-current="${current ? 'step' : 'false'}">${i + 1}${flagged ? '<span class="map-num__flag"></span>' : ''}</button>`;
+  }).join('');
+}
+
+function previewAnsweredCount(exam, state) {
+  return exam.questions.reduce((count, q) => {
+    const value = state.answers[q.id];
+    return count + (value !== undefined && value !== '' ? 1 : 0);
+  }, 0);
+}
+
+export function teacherExamPreviewView(ctx) {
+  const { session } = ctx;
+  const exam = findExam(ctx.examId);
+  if (!exam) {
+    return {
+      html: teacherShell(session, { active: 'exams', crumb: 'ไม่พบชุดสอบ', content: `<div class="teacher-card">${emptyState({ iconName: 'file-text', title: 'ไม่พบชุดสอบ', text: 'ชุดสอบนี้อาจถูกลบหรือลิงก์ไม่ถูกต้อง', action: '<a class="btn btn--primary" href="#/teacher/exams">กลับชุดสอบทั้งหมด</a>' })}</div>` }),
+      mount: () => mountTeacherShell(session)
+    };
+  }
+  if (!canEditExam(exam, session)) {
+    return {
+      html: teacherShell(session, { active: 'exams', crumb: 'พรีวิวข้อสอบ', content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'พรีวิวชุดสอบนี้ไม่ได้', text: 'พรีวิวได้เฉพาะเจ้าของชุดสอบ หรือครูที่ได้รับสิทธิ์แก้ไขชุดสอบนี้เท่านั้น', action: `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/overview">กลับหน้าจัดการชุดสอบ</a>` })}</div>` }),
+      mount: () => mountTeacherShell(session)
+    };
+  }
+  if (!Array.isArray(exam.questions) || !exam.questions.length) {
+    return {
+      html: teacherShell(session, { active: 'exams', crumb: 'พรีวิวข้อสอบ', content: `<div class="teacher-card">${emptyState({ iconName: 'file-text', title: 'ยังไม่มีข้อสอบให้พรีวิว', text: 'เพิ่มข้อสอบอย่างน้อย 1 ข้อก่อนเปิดดูตัวอย่าง', action: `<a class="btn btn--primary" href="#/teacher/exam/${exam.id}/edit">ไปแก้ไขชุดสอบ</a>` })}</div>` }),
+      mount: () => mountTeacherShell(session)
+    };
+  }
+
+  const me = currentTeacher(session);
+  const teacherName = me?.name || 'ครู';
+  const state = { answers: {}, flags: {} };
+  let idx = 0;
+  const content = `<div class="exam-app preview-app">
+    <header class="exam-topbar preview-topbar">
+      <div class="exam-topbar__inner">
+        <div class="exam-topbar__brand">${brand({ href: `#/teacher/exam/${exam.id}/overview`, subtitle: 'พรีวิว' })}</div>
+        <div class="exam-topbar__title">
+          <strong>${e(exam.title)}</strong>
+          <span>${icon('eye', 10)} มุมมองนักเรียน · ${e(exam.subject)}</span>
+        </div>
+        <div class="exam-topbar__center">
+          <span class="preview-mode-pill">${icon('eye', 13)} โหมดพรีวิว · ไม่บันทึกคำตอบ</span>
+        </div>
+        <a class="btn btn--ghost exam-topbar__submit preview-back" href="#/teacher/exam/${exam.id}/overview">${icon('arrow-left', 15)} <span class="btn-label">กลับหน้าจัดการ</span></a>
+      </div>
+      <div class="exam-topbar__progress"><span data-preview-progress style="width:0%"></span></div>
+    </header>
+    <main class="exam-layout">
+      <section class="exam-main">
+        <div id="preview-question-stage">${previewQuestionMarkup(exam, state, idx)}</div>
+        <div class="keyboard-hint">นี่คือมุมมองที่นักเรียนจะเห็น · เลือกคำตอบเพื่อทดลองได้ แต่จะไม่ถูกบันทึก</div>
+      </section>
+      <aside class="exam-side">
+        <div class="exam-user-card card">
+          ${avatar(teacherName, me?.id || session.teacherId || teacherName, 'md')}
+          <div class="exam-user-card__copy">
+            <strong>${e(teacherName)}</strong>
+            <span>ครู · มุมมองนักเรียน</span>
+            <small>${icon('eye', 10)} โหมดพรีวิว</small>
+          </div>
+        </div>
+        <div class="exam-map-card card">
+          <div class="exam-map-head">
+            <div><h3>แผนที่ข้อสอบ</h3><p>คลิกเพื่อข้ามไปข้อนั้น</p></div>
+            <span class="exam-map-count" data-preview-count>0 / ${exam.questions.length}</span>
+          </div>
+          <div class="exam-map-grid" data-preview-map-grid>${previewMapMarkup(exam, state, idx)}</div>
+          <div class="exam-map-legend">
+            <span class="legend-item"><span class="legend-swatch"></span>ยังไม่ตอบ</span>
+            <span class="legend-item"><span class="legend-swatch legend-swatch--answered"></span>ตอบแล้ว</span>
+            <span class="legend-item"><span class="legend-swatch legend-swatch--flagged"></span>ทำเครื่องหมาย</span>
+            <span class="legend-item"><span class="legend-swatch legend-swatch--current"></span>ข้อปัจจุบัน</span>
+          </div>
+          <div class="exam-map-actions">
+            <a class="btn btn--primary btn--sm btn--wide" href="#/teacher/exam/${exam.id}/overview">${icon('check', 14)} จบการพรีวิว</a>
+          </div>
+        </div>
+        <div class="exam-side-note">${icon('info', 12)} การเลือกคำตอบในโหมดนี้เป็นการทดลองเท่านั้น ไม่บันทึกและไม่ส่งผลต่อนักเรียน</div>
+      </aside>
+    </main>
+  </div>`;
+
+  return {
+    html: content,
+    mount() {
+      const stage = document.getElementById('preview-question-stage');
+      const mapGrid = document.querySelector('[data-preview-map-grid]');
+      const progress = document.querySelector('[data-preview-progress]');
+      const count = document.querySelector('[data-preview-count]');
+      if (!stage || !mapGrid) return;
+
+      const renderSummary = () => {
+        const answered = previewAnsweredCount(exam, state);
+        mapGrid.innerHTML = previewMapMarkup(exam, state, idx);
+        if (count) count.textContent = `${answered} / ${exam.questions.length}`;
+        if (progress) progress.style.width = `${exam.questions.length ? Math.round((answered / exam.questions.length) * 100) : 0}%`;
+      };
+      const render = () => {
+        stage.innerHTML = previewQuestionMarkup(exam, state, idx);
+        renderSummary();
+      };
+
+      stage.addEventListener('click', (ev) => {
+        const option = ev.target.closest('[data-preview-option]');
+        if (option) {
+          const qid = stage.querySelector('[data-preview-qid]')?.dataset.previewQid;
+          if (qid) state.answers[qid] = option.dataset.previewOption;
+          render();
+          return;
+        }
+        const tf = ev.target.closest('[data-preview-tf]');
+        if (tf) {
+          const qid = stage.querySelector('[data-preview-qid]')?.dataset.previewQid;
+          if (qid) state.answers[qid] = tf.dataset.previewTf;
+          render();
+          return;
+        }
+        if (ev.target.closest('[data-preview-flag]')) {
+          const qid = stage.querySelector('[data-preview-qid]')?.dataset.previewQid;
+          if (qid) state.flags[qid] = !state.flags[qid];
+          render();
+          return;
+        }
+        if (ev.target.closest('[data-preview-prev]')) {
+          if (idx > 0) { idx -= 1; render(); }
+          return;
+        }
+        if (ev.target.closest('[data-preview-next]')) {
+          if (idx < exam.questions.length - 1) { idx += 1; render(); }
+        }
+      });
+
+      stage.addEventListener('input', (ev) => {
+        const input = ev.target.closest('[data-preview-input]');
+        if (!input) return;
+        const qid = input.dataset.previewInput;
+        if (qid) state.answers[qid] = input.value;
+        const char = stage.querySelector('[data-preview-char]');
+        if (char) char.textContent = `${input.value.length} / 1500`;
+        renderSummary();
+      });
+
+      mapGrid.addEventListener('click', (ev) => {
+        const map = ev.target.closest('[data-preview-map]');
+        if (!map) return;
+        const next = Number(map.dataset.previewMap);
+        if (Number.isInteger(next) && next >= 0 && next < exam.questions.length) {
+          idx = next;
+          render();
+        }
+      });
+    }
+  };
 }
 
 export function teacherExamView(ctx) {

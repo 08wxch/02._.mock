@@ -7,7 +7,7 @@ import {
   resultView, historyView
 } from './views/student.js';
 import {
-  teacherDashboardView, teacherExamsView, teacherExamView,
+  teacherDashboardView, teacherExamsView, teacherExamView, teacherExamPreviewView,
   teacherAnswerView, teacherReviewView, teacherStudentsView, teacherStaffView,
   teacherStudentView, teacherStudentExamView
 } from './views/teacher.js';
@@ -150,6 +150,10 @@ function routeView(route) {
       if (fourth === 'edit') {
         setTitle('แก้ไขชุดสอบ');
         return createExamView({ session: teacherSession, examId: third, query });
+      }
+      if (fourth === 'preview') {
+        setTitle('พรีวิวข้อสอบ');
+        return teacherExamPreviewView({ session: teacherSession, examId: third, query });
       }
       const tab = fourth || 'overview';
       setTitle('จัดการชุดสอบ');
