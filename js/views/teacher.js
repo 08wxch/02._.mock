@@ -586,7 +586,7 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true, canR
           <div class="overview-info-row"><span>${icon('check-circle', 11)} เกณฑ์ผ่าน</span><strong>${exam.passPercent}%</strong></div>
           <div class="overview-info-row"><span>${icon('calendar', 11)} เริ่มสอบ</span><strong>${thaiDateTime(exam.openAt)}</strong></div>
           <div class="overview-info-row"><span>${icon('timer', 11)} ปิดรับ</span><strong>${thaiDateTime(exam.closeAt)}</strong></div>
-          <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์ครูอื่น</span><strong>${exam.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
+          <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์การเข้าถึง</span><strong>${exam.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
         </div>
       </div>
       <div class="overview-panel card">

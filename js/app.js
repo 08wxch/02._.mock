@@ -26,7 +26,7 @@ try {
   const restored = await cloudRestore();
   if (restored) {
     setSession(restored.session);
-    replaceDB(restored.db);
+    replaceDB(mergeLocalNoticeReads(restored.db));
   } else if (isCloudEnabled()) {
     clearSession();
   }
@@ -37,6 +37,22 @@ try {
 
 function setTitle(title) {
   document.title = title ? `${title} · 02._.mock` : '02._.mock — ระบบสอบออนไลน์';
+}
+
+// Student accounts cannot write app_state in Supabase, so their read markers
+// live in this browser. Merge them into every cloud snapshot before replacing
+// the in-memory DB; otherwise a refresh makes read notifications reappear.
+function mergeLocalNoticeReads(next) {
+  if (!next) return next;
+  const localReads = getDB()?.noticeReads;
+  if (!localReads || typeof localReads !== 'object') return next;
+  next.noticeReads = { ...(next.noticeReads || {}) };
+  Object.entries(localReads).forEach(([key, ids]) => {
+    if (!Array.isArray(ids)) return;
+    const current = Array.isArray(next.noticeReads[key]) ? next.noticeReads[key] : [];
+    next.noticeReads[key] = [...new Set([...current, ...ids])].slice(-200);
+  });
+  return next;
 }
 
 function requireSession(role, routeName) {
@@ -250,7 +266,7 @@ async function refreshFromCloud() {
   try {
     const next = await cloudRefresh();
     if (next) {
-      replaceDB(next);
+      replaceDB(mergeLocalNoticeReads(next));
       sweepExpiredAttempts();
       refreshRoute({ scroll: false });
     }

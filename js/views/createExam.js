@@ -398,7 +398,7 @@ function summaryHTML(draftData, sourceExam) {
     <div class="create-summary__line"><span>เวลาทำ</span><strong>${draftData.duration} นาที</strong></div>
     <div class="create-summary__line"><span>เกณฑ์ผ่าน</span><strong>${draftData.passPercent}%</strong></div>
     <div class="create-summary__line"><span>ผู้เข้าสอบ</span><strong>${draftData.assignedStudentIds.length} คน</strong></div>
-    <div class="create-summary__line"><span>สิทธิ์ครูอื่น</span><strong>${draftData.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
+    <div class="create-summary__line"><span>สิทธิ์การเข้าถึง</span><strong>${draftData.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
     <div class="create-summary__line"><span>สถานะ</span><strong>${statusLabel}</strong></div>
     <div class="create-summary__total"><span>รวมทั้งสิ้น</span><strong>${total} คะแนน</strong></div>`;
 }

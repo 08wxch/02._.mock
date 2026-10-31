@@ -95,8 +95,39 @@ function studentShell(session, { active = 'dashboard', content = '', extraClass 
   </div>`;
 }
 
+function syncStudentNoticeBadge() {
+  const root = document.querySelector('[data-notice-root]');
+  if (!root) return;
+  const count = root.querySelectorAll('.notice-item').length;
+  const badge = root.querySelector('.icon-btn__badge');
+  if (count) {
+    if (badge) badge.textContent = count > 9 ? '9+' : String(count);
+  } else {
+    badge?.remove();
+  }
+  const toggle = root.querySelector('[data-notice-toggle]');
+  if (toggle) toggle.setAttribute('aria-label', `การแจ้งเตือน${count ? ` ${count} รายการ` : ''}`);
+  const head = root.querySelector('.popover__head span');
+  if (head) head.textContent = count ? `${count} รายการใหม่` : 'ยังไม่มีการแจ้งเตือน';
+  const list = root.querySelector('.popover__list');
+  if (!count && list) list.innerHTML = `<div class="popover__empty">${icon('bell', 26)}<span>ไม่มีการแจ้งเตือนใหม่</span></div>`;
+}
+
+function bindStudentNoticeReads(session) {
+  document.querySelectorAll('[data-notice-id]').forEach(link => {
+    if (link.dataset.noticeReadBound) return;
+    link.dataset.noticeReadBound = '1';
+    link.addEventListener('click', () => {
+      markNoticeRead(session, link.dataset.noticeId);
+      link.closest('.notice-item')?.remove();
+      syncStudentNoticeBadge();
+    });
+  });
+}
+
 function mountStudentShell(session) {
   mountNotificationBell(document);
+  bindStudentNoticeReads(session);
   document.querySelector('[data-open-student-profile]')?.addEventListener('click', () => {
     const student = getDB().students.find(s => s.id === currentStudentKey(session));
     if (!student) {
@@ -159,6 +190,31 @@ function availableExamCard(exam, session) {
   </a>`;
 }
 
+function upcomingExamCard(exam) {
+  const details = exam.topic || exam.description || 'ตรวจสอบวันเวลาและรายละเอียดก่อนเข้าสอบ';
+  return `<a class="available-exam-card upcoming-exam-card" href="#/student/exam/${exam.id}/instructions">
+    <div class="available-exam-card__top">
+      <span class="available-exam-card__subject">${icon('book-open', 12)} ${e(exam.subject)}</span>
+      <span class="badge badge--warning">${icon('clock', 11)} ยังไม่ถึงเวลา</span>
+    </div>
+    <h3>${e(exam.title)}</h3>
+    <p class="upcoming-exam-card__desc">${e(details)}</p>
+    <div class="upcoming-exam-card__schedule">
+      <div><span>${icon('calendar', 11)} เปิดสอบ</span><strong>${thaiDateTime(exam.openAt)}</strong></div>
+      <div><span>${icon('timer', 11)} ปิดรับคำตอบ</span><strong>${thaiDateTime(exam.closeAt)}</strong></div>
+    </div>
+    <div class="available-exam-card__meta">
+      <span>${icon('file-text', 11)} ${exam.questions.length} ข้อ</span>
+      <span>${icon('clock', 11)} ${exam.duration} นาที</span>
+      <span>${icon('award', 11)} ${exam.totalPoints} คะแนน</span>
+    </div>
+    <div class="available-exam-card__foot">
+      <span>${icon('user', 11)} ${e(exam.teacherName)}</span>
+      <strong>ดูกำหนดการ ${icon('arrow-right', 13)}</strong>
+    </div>
+  </a>`;
+}
+
 function latestAnnouncedAttempt(session) {
   const db = getDB();
   const attempts = getStudentAttempts(session);
@@ -179,6 +235,10 @@ export function studentDashboardView(ctx) {
       const rank = stateOrder[studentAttemptState(a, session)] - stateOrder[studentAttemptState(b, session)];
       return rank || new Date(a.closeAt) - new Date(b.closeAt);
     });
+  const upcomingExams = db.exams
+    .filter(ex => examAvailability(ex) === 'upcoming' && isStudentAssigned(ex, session))
+    .sort((a, b) => new Date(a.openAt) - new Date(b.openAt));
+  const nextUpcoming = upcomingExams[0] || null;
   const mainExam = activeExams[0] || null;
   const attempt = mainExam ? findStudentAttempt(mainExam.id, session) : null;
   const attempts = getStudentAttempts(session);
@@ -188,21 +248,21 @@ export function studentDashboardView(ctx) {
 
   let spotlight = `<div class="exam-spotlight">
     <div class="exam-spotlight__top">
-      <span class="exam-spotlight__kicker">${icon('calendar', 13)} ยังไม่มีชุดสอบที่เปิดอยู่</span>
-      <span class="badge badge--neutral">ว่าง</span>
+      <span class="exam-spotlight__kicker">${icon('calendar', 13)} ${nextUpcoming ? 'ยังไม่มีชุดสอบที่เปิดทำตอนนี้' : 'ยังไม่มีชุดสอบที่เปิดอยู่'}</span>
+      <span class="badge badge--neutral">${nextUpcoming ? 'มีกำหนดการ' : 'ว่าง'}</span>
     </div>
     <div class="exam-spotlight__grid">
       <div>
-        <h2>วันนี้ยังไม่มีห้องสอบ</h2>
-        <p class="exam-spotlight__sub">เมื่อครูเปิดชุดสอบใหม่ รายการจะปรากฏที่นี่โดยอัตโนมัติ</p>
+        <h2>${nextUpcoming ? 'มีกำหนดการสอบที่กำลังจะมาถึง' : 'วันนี้ยังไม่มีห้องสอบ'}</h2>
+        <p class="exam-spotlight__sub">${nextUpcoming ? `ชุดสอบ “${e(nextUpcoming.title)}” เปิดสอบ ${thaiDateTime(nextUpcoming.openAt)}` : 'เมื่อครูเปิดชุดสอบใหม่ รายการจะปรากฏที่นี่โดยอัตโนมัติ'}</p>
         <div class="exam-meta-chips">
-          <span class="exam-meta-chip">${icon('bell', 12)} ติดตามการแจ้งเตือนจากครู</span>
+          <span class="exam-meta-chip">${icon(nextUpcoming ? 'calendar' : 'bell', 12)} ${nextUpcoming ? 'ดูรายละเอียดกำหนดการด้านล่าง' : 'ติดตามการแจ้งเตือนจากครู'}</span>
         </div>
       </div>
     </div>
     <div class="exam-spotlight__bottom">
-      <div class="exam-spotlight__note">${icon('book-open', 14)} อ่านทบทวนบทเรียนระหว่างรอได้เลย</div>
-      <div class="exam-spotlight__actions"><a class="btn btn--white" href="#/student/history">ดูประวัติการสอบ ${icon('arrow-right', 15)}</a></div>
+      <div class="exam-spotlight__note">${icon('book-open', 14)} ${nextUpcoming ? 'เตรียมตัวและตรวจสอบเวลาให้พร้อมก่อนเริ่มสอบ' : 'อ่านทบทวนบทเรียนระหว่างรอได้เลย'}</div>
+      <div class="exam-spotlight__actions">${nextUpcoming ? `<a class="btn btn--white" href="#/student/exam/${nextUpcoming.id}/instructions">ดูกำหนดการ ${icon('arrow-right', 15)}</a>` : `<a class="btn btn--white" href="#/student/history">ดูประวัติการสอบ ${icon('arrow-right', 15)}</a>`}</div>
     </div>
   </div>`;
 
@@ -270,6 +330,14 @@ export function studentDashboardView(ctx) {
       <span class="badge badge--neutral">${icon('file-text', 11)} ${activeExams.length} ชุดที่ทำได้</span>
     </div>
     <div class="available-exams__grid">${otherExams.map(ex => availableExamCard(ex, session)).join('')}</div>
+  </section>` : '';
+
+  const upcomingPanel = upcomingExams.length ? `<section class="available-exams card upcoming-exams">
+    <div class="section-heading">
+      <div><h2>กำหนดการสอบที่กำลังจะมาถึง</h2><p>ชุดสอบที่ครูเปิดให้เห็นแล้วและมอบหมายให้คุณ · ยังไม่ถึงเวลาเริ่ม แต่ตรวจสอบรายละเอียดล่วงหน้าได้</p></div>
+      <span class="badge badge--neutral">${icon('calendar', 11)} ${upcomingExams.length} ชุด</span>
+    </div>
+    <div class="available-exams__grid upcoming-exams__grid">${upcomingExams.map(ex => upcomingExamCard(ex)).join('')}</div>
   </section>` : '';
 
   const historyRows = attempts.slice(0, 4).map(a => {
@@ -343,13 +411,14 @@ export function studentDashboardView(ctx) {
         <div>
           <div class="eyebrow">${icon('sparkles', 12)} ${greetingByHour()} · ${thaiDate(now)}</div>
           <h1>สวัสดี, <span>${e(firstName(session.name))}</span></h1>
-          <p>${activeExams.length > 1 ? `มีชุดสอบเปิดอยู่ ${activeExams.length} ชุด เลือกทำตามกำหนดปิดรับได้เลย` : activeExams.length ? 'มีชุดสอบเปิดอยู่ รักษาเวลาและสมาธิให้ดีนะ' : 'วันนี้ยังไม่มีกำหนดสอบ พักผ่อนและทบทวนบทเรียนได้เลย'}</p>
+          <p>${activeExams.length > 1 ? `มีชุดสอบเปิดอยู่ ${activeExams.length} ชุด เลือกทำตามกำหนดปิดรับได้เลย` : activeExams.length ? 'มีชุดสอบเปิดอยู่ รักษาเวลาและสมาธิให้ดีนะ' : upcomingExams.length ? `มีกำหนดการสอบที่กำลังจะมาถึง ${upcomingExams.length} ชุด ตรวจสอบวันเวลาได้เลย` : 'วันนี้ยังไม่มีกำหนดสอบ พักผ่อนและทบทวนบทเรียนได้เลย'}</p>
         </div>
         <div class="dashboard-date">${icon('calendar', 16)} ${longThaiDate(now)}</div>
       </div>
       <div class="dashboard-grid">
         <div class="stack">
           ${spotlight}
+          ${upcomingPanel}
           ${examPicker}
           <section class="history-panel card">
             <div class="section-heading">
@@ -438,14 +507,97 @@ export function instructionsView(ctx) {
   } else if (attempt) {
     setTimeout(() => navigate(exam.status === 'announced' ? `/student/exam/${exam.id}/result` : `/student/exam/${exam.id}/success`), 0);
   }
-  if (examAvailability(exam) !== 'open') {
-    const availability = examAvailability(exam);
+  const availability = examAvailability(exam);
+  if (availability === 'upcoming') {
+    const note = exam.instructions || 'ทำข้อสอบให้ครบทุกข้อ ห้ามเปิดแท็บอื่นระหว่างสอบ';
+    const remainingText = formatCountdownWords(new Date(exam.openAt).getTime() - Date.now());
+    const content = `<div class="instructions-shell">
+      <a class="page-back" href="#/student">${icon('arrow-left', 15)} กลับหน้าหลัก</a>
+      <div class="page-title-row">
+        <div>
+          <div class="eyebrow">${icon('calendar', 12)} กำหนดการสอบ</div>
+          <h1>${e(exam.title)}</h1>
+          <p>${mathText(exam.description || exam.topic || '')}</p>
+        </div>
+        <span class="badge badge--warning">${icon('clock', 11)} ยังไม่ถึงเวลาเริ่ม</span>
+      </div>
+      <div class="instructions-grid">
+        <section class="instructions-main card">
+          <div class="instructions-main__head">
+            <span class="instructions-subject-icon">${icon(exam.subject === 'คณิตศาสตร์' ? 'chart' : 'book-open', 25)}</span>
+            <div>
+              <h1>${e(exam.title)}</h1>
+              <p>${mathText(exam.topic || exam.subject)}${exam.level ? ` · ${e(exam.level)}` : ''}</p>
+            </div>
+          </div>
+          <div class="instructions-meta">
+            <div class="instruction-stat"><span>${icon('file-text', 11)} จำนวนข้อ</span><strong>${exam.questions.length} <small>ข้อ</small></strong></div>
+            <div class="instruction-stat"><span>${icon('clock', 11)} เวลาทำ</span><strong>${exam.duration} <small>นาที</small></strong></div>
+            <div class="instruction-stat"><span>${icon('award', 11)} คะแนนเต็ม</span><strong>${exam.totalPoints} <small>คะแนน</small></strong></div>
+            <div class="instruction-stat"><span>${icon('rotate-ccw', 11)} สอบได้</span><strong>${exam.attemptsAllowed} <small>ครั้ง</small></strong></div>
+          </div>
+          <div class="instructions-section">
+            <h2>${icon('calendar', 16)} เวลาการสอบ</h2>
+            <div class="upcoming-detail-grid">
+              <div class="upcoming-detail-item upcoming-detail-item--open">
+                <span>${icon('play', 13)} เปิดให้เริ่มสอบ</span>
+                <strong>${thaiDateTime(exam.openAt)}</strong>
+              </div>
+              <div class="upcoming-detail-item">
+                <span>${icon('lock', 13)} ปิดรับคำตอบ</span>
+                <strong>${thaiDateTime(exam.closeAt)}</strong>
+              </div>
+              <div class="upcoming-detail-item">
+                <span>${icon('clock', 13)} ระยะเวลาทำข้อสอบ</span>
+                <strong>${exam.duration} นาที</strong>
+              </div>
+              <div class="upcoming-detail-item">
+                <span>${icon('timer', 13)} เริ่มในอีก</span>
+                <strong>${remainingText}</strong>
+              </div>
+            </div>
+            <div class="notice-strip notice-strip--info" style="margin-top:12px">${icon('info', 14)}<span>ยังไม่ถึงเวลาเริ่มสอบ · ระบบจะเปิดปุ่มเริ่มทำข้อสอบให้อัตโนมัติเมื่อถึงเวลา <strong>${thaiDateTime(exam.openAt)}</strong></span></div>
+          </div>
+          <div class="instructions-section">
+            <h2>${icon('clipboard-check', 16)} คำชี้แจงจากครู</h2>
+            <div class="instruction-note">${mathText(note)}</div>
+          </div>
+          <div class="instructions-actions">
+            <button class="btn btn--primary btn--lg btn--wide" type="button" disabled>${icon('lock', 17)} ยังไม่ถึงเวลาเริ่มสอบ</button>
+            <div class="instructions-actions__hint">${icon('calendar', 10)} เปิดให้เข้าสอบ ${thaiDateTime(exam.openAt)}</div>
+          </div>
+        </section>
+        <aside class="instructions-side">
+          <div class="teacher-card card">
+            <div class="teacher-card__top">
+              ${avatar(exam.teacherName, exam.teacherName, 'md')}
+              <div class="teacher-card__copy"><strong>${e(exam.teacherName)}</strong><span>ครูผู้สอน · ${e(exam.subject)}</span></div>
+            </div>
+            <div class="teacher-card__quote">“${mathText(note)}”</div>
+          </div>
+          <div class="tip-card card">
+            <h3>${icon('sparkles', 14)} เตรียมตัวล่วงหน้า</h3>
+            <ul>
+              <li>ตรวจสอบวันและเวลาให้ตรงกับตารางเรียน</li>
+              <li>เตรียมอุปกรณ์และอินเทอร์เน็ตให้พร้อมก่อนถึงเวลา</li>
+              <li>เข้าสอบตรงเวลา ระบบจะเริ่มนับเวลาทันที</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </div>`;
+    return {
+      html: studentShell(session, { active: 'dashboard', content }),
+      mount: () => mountStudentShell(session)
+    };
+  }
+  if (availability !== 'open') {
     return {
       html: studentShell(session, {
         active: 'dashboard',
         content: `<div class="instructions-shell">
           <a class="page-back" href="#/student">${icon('arrow-left', 15)} กลับหน้าหลัก</a>
-          <div class="card">${emptyState({ iconName: 'lock', title: exam.status === 'announced' ? 'ชุดสอบนี้ประกาศผลแล้ว' : availability === 'upcoming' ? 'ชุดสอบยังไม่เปิด' : 'ชุดสอบนี้ปิดรับคำตอบแล้ว', text: 'ไม่สามารถเข้าสอบใหม่ได้ หากมีข้อสงสัยกรุณาติดต่อครูผู้สอน', action: `<a class="btn btn--primary" href="#/student">กลับหน้าหลัก</a>` })}</div>
+          <div class="card">${emptyState({ iconName: 'lock', title: exam.status === 'announced' ? 'ชุดสอบนี้ประกาศผลแล้ว' : 'ชุดสอบนี้ปิดรับคำตอบแล้ว', text: 'ไม่สามารถเข้าสอบใหม่ได้ หากมีข้อสงสัยกรุณาติดต่อครูผู้สอน', action: `<a class="btn btn--primary" href="#/student">กลับหน้าหลัก</a>` })}</div>
         </div>`
       }),
       mount: () => mountStudentShell(session)
