@@ -1220,7 +1220,12 @@ export function canEditExam(exam, session) {
 
 export function canViewExamStats(exam, session) {
   if (!exam || !session || session.role !== 'teacher') return false;
-  return canViewExam(exam, session);
+  if (!canViewExam(exam, session)) return false;
+  // Creators, editors, managers, and reviewers need live statistics.
+  if (canManageExam(exam, session) || canEditExam(exam, session) || canReviewExam(exam, session)) return true;
+  // A view-only colleague sees statistics after the exam is closed. The
+  // statistics view itself never renders question text or answer choices.
+  return exam.status === 'closed' || exam.status === 'announced';
 }
 
 function normalizeLoginText(value) {
@@ -1382,7 +1387,7 @@ export function updateExam(examId, updates = {}, actor = null) {
   const db = getDB();
   const exam = db.exams.find(e => e.id === examId);
   if (!exam) return { ok: false, error: 'ไม่พบชุดสอบ' };
-  if (!canEditExam(exam, actor)) return { ok: false, error: 'ชุดสอบนี้ตั้งค่าให้ดูได้อย่างเดียว หรือคุณไม่มีสิทธิ์แก้ไข' };
+  if (!canEditExam(exam, actor)) return { ok: false, error: 'ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นแก้ไขไม่ได้ หรือคุณไม่มีสิทธิ์แก้ไข' };
   Object.assign(exam, updates);
   exam.totalPoints = exam.questions.reduce((sum, q) => sum + Number(q.points || 0), 0);
   return { ok: true, exam, pending: saveDB() };

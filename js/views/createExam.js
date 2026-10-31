@@ -398,7 +398,7 @@ function summaryHTML(draftData, sourceExam) {
     <div class="create-summary__line"><span>เวลาทำ</span><strong>${draftData.duration} นาที</strong></div>
     <div class="create-summary__line"><span>เกณฑ์ผ่าน</span><strong>${draftData.passPercent}%</strong></div>
     <div class="create-summary__line"><span>ผู้เข้าสอบ</span><strong>${draftData.assignedStudentIds.length} คน</strong></div>
-    <div class="create-summary__line"><span>สิทธิ์ครูอื่น</span><strong>${draftData.shareMode === 'edit' ? 'แก้ไขได้' : 'ดูอย่างเดียว'}</strong></div>
+    <div class="create-summary__line"><span>สิทธิ์ครูอื่น</span><strong>${draftData.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
     <div class="create-summary__line"><span>สถานะ</span><strong>${statusLabel}</strong></div>
     <div class="create-summary__total"><span>รวมทั้งสิ้น</span><strong>${total} คะแนน</strong></div>`;
 }
@@ -709,7 +709,7 @@ export function createExamView(ctx) {
       html: teacherShell(session, {
         active: 'exams',
         crumb: 'อ่านอย่างเดียว',
-        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'แก้ไขชุดสอบนี้ไม่ได้', text: 'ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นดูได้อย่างเดียว เฉพาะเจ้าของชุดสอบและ Wich Pitchon ที่แก้ไขได้', action: `<a class="btn btn--primary" href="#/teacher/exam/${sourceExam.id}/overview">ดูข้อมูลชุดสอบ</a>` })}</div>`
+        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'แก้ไขชุดสอบนี้ไม่ได้', text: 'ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นแก้ไขไม่ได้ เฉพาะเจ้าของชุดสอบและ Wich Pitchon ที่แก้ไขได้', action: `<a class="btn btn--primary" href="#/teacher/exam/${sourceExam.id}/overview">ดูข้อมูลชุดสอบ</a>` })}</div>`
       }),
       mount: () => mountTeacherShell(session)
     };
@@ -804,10 +804,10 @@ export function createExamView(ctx) {
             <p class="field__hint" style="margin-top:-4px">${icon('info', 12)} นักเรียนจะเข้าสอบได้เฉพาะช่วงเวลานี้ · ระบบใช้เวลาท้องถิ่นของเครื่อง</p>
             <div class="field"><label for="exam-share-mode">สิทธิ์ของครูท่านอื่น</label>
               <select class="select" id="exam-share-mode" data-field="shareMode">
-                <option value="view" ${draft.shareMode !== 'edit' ? 'selected' : ''}>ดูได้อย่างเดียว · ซ่อนสถิติจนปิดสอบ</option>
-                <option value="edit" ${draft.shareMode === 'edit' ? 'selected' : ''}>แก้ไขชุดสอบได้</option>
+                <option value="view" ${draft.shareMode !== 'edit' ? 'selected' : ''}>ครูท่านอื่นแก้ไขไม่ได้</option>
+                <option value="edit" ${draft.shareMode === 'edit' ? 'selected' : ''}>ครูท่านอื่นแก้ไขได้</option>
               </select>
-              <p class="field__hint">${icon('eye', 12)} ถ้าเลือกดูอย่างเดียว ครูท่านอื่นจะเห็นสถิติหลังปิดสอบแล้วเท่านั้น · Wich เห็นทุกอย่างเสมอ</p>
+              <p class="field__hint">${icon('eye', 12)} ถ้าเลือก “แก้ไขไม่ได้” ครูท่านอื่นจะเห็นสถิติหลังปิดสอบ และหน้าสถิติจะไม่แสดงโจทย์ ตัวเลือก หรือเฉลย · Wich เห็นทุกอย่างเสมอ</p>
             </div>
           </div>
         </section>

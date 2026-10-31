@@ -466,7 +466,7 @@ export function teacherExamsView(ctx) {
 function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false, canReview = false, canRemind = false } = {}) {
   const meta = statusMeta(exam.status);
   const creator = creatorOfExam(exam);
-  const shareLabel = exam.shareMode === 'edit' ? 'ครูอื่นแก้ไขได้' : 'ครูอื่นดูอย่างเดียว';
+  const shareLabel = exam.shareMode === 'edit' ? 'ครูอื่นแก้ไขได้' : 'ครูอื่นแก้ไขไม่ได้';
   return `<a class="page-back" href="#/teacher/exams">${icon('arrow-left', 15)} กลับชุดสอบทั้งหมด</a>
   <div class="exam-admin-head">
     <div class="exam-admin-head__main">
@@ -515,7 +515,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
     ${canReview ? `<a class="exam-tab ${tab === 'grading' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/grading">${icon('clipboard-check', 13)} ตรวจคำตอบ ${metrics.pendingReview ? `<span class="exam-tab__count exam-tab__count--alert">${metrics.pendingReview}</span>` : ''}</a>` : ''}
     ${canViewStats ? `<a class="exam-tab ${tab === 'stats' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/stats">${icon('chart', 13)} สถิติ</a>` : ''}
   </div>
-  ${!canViewStats ? `<div class="exam-stats-locked">${icon('lock', 13)} ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นดูได้อย่างเดียว · สถิติจะเปิดให้ดูเมื่อปิดสอบแล้ว</div>` : ''}`;
+  ${!canViewStats ? `<div class="exam-stats-locked">${icon('lock', 13)} ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นแก้ไขไม่ได้ · สถิติจะเปิดให้ดูเมื่อปิดสอบแล้ว</div>` : ''}`;
 }
 
 function overviewTab(exam, metrics, canManage = false, canViewStats = true, canReview = false) {
@@ -539,7 +539,7 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true, canR
         <div class="overview-metric"><span>${icon('users', 11)} ผู้เข้าสอบ</span><strong>${metrics.total} <small>คน</small></strong></div>
       </div>
       <section class="overview-panel card exam-overview-locked">
-        ${emptyState({ iconName: 'lock', title: 'สถิติถูกซ่อนไว้', text: 'ชุดสอบนี้แชร์แบบดูอย่างเดียว · สถิติและรายละเอียดคำตอบจะเปิดให้ดูเมื่อปิดรับคำตอบแล้ว', action: `<a class="btn btn--ghost btn--sm" href="#/teacher/exams">กลับชุดสอบทั้งหมด</a>` })}
+        ${emptyState({ iconName: 'lock', title: 'สถิติถูกซ่อนไว้', text: 'ชุดสอบนี้แชร์แบบครูท่านอื่นแก้ไขไม่ได้ · สถิติและรายละเอียดคำตอบจะเปิดให้ดูเมื่อปิดรับคำตอบแล้ว', action: `<a class="btn btn--ghost btn--sm" href="#/teacher/exams">กลับชุดสอบทั้งหมด</a>` })}
       </section>`
     : `<div class="overview-metrics">
         <div class="overview-metric"><span>${icon('users', 11)} ผู้เข้าสอบ</span><strong>${metrics.total} <small>คน</small></strong></div>
@@ -585,7 +585,7 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true, canR
           <div class="overview-info-row"><span>${icon('check-circle', 11)} เกณฑ์ผ่าน</span><strong>${exam.passPercent}%</strong></div>
           <div class="overview-info-row"><span>${icon('calendar', 11)} เริ่มสอบ</span><strong>${thaiDateTime(exam.openAt)}</strong></div>
           <div class="overview-info-row"><span>${icon('timer', 11)} ปิดรับ</span><strong>${thaiDateTime(exam.closeAt)}</strong></div>
-          <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์ครูอื่น</span><strong>${exam.shareMode === 'edit' ? 'แก้ไขได้' : 'ดูอย่างเดียว'}</strong></div>
+          <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์ครูอื่น</span><strong>${exam.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
         </div>
       </div>
       <div class="overview-panel card">
@@ -838,9 +838,9 @@ function statsTab(exam, metrics) {
     </div>
     <div class="stats-two-col" style="margin-top:16px">
       <div class="stats-panel">
-        <div class="stats-panel__head"><div><h2>ความแม่นยำรายข้อ</h2><p>ข้อใดที่นักเรียนตอบถูกน้อยที่สุด</p></div><span class="badge badge--neutral">${qstats.length} ข้อ</span></div>
+        <div class="stats-panel__head"><div><h2>ความแม่นยำรายข้อ</h2><p>ข้อใดที่นักเรียนตอบถูกน้อยที่สุด · ไม่แสดงโจทย์ ตัวเลือก หรือเฉลย</p></div><span class="badge badge--neutral">${qstats.length} ข้อ</span></div>
         <div class="accuracy-list">
-          ${qstats.map(s => `<div class="accuracy-row"><span class="accuracy-num">${s.index + 1}</span><div class="accuracy-copy"><strong>${mathText(s.q.text)}</strong><div class="progress-mini"><span style="width:${s.type === 'essay' ? (s.q.points ? Math.round((s.average / s.q.points) * 100) : 0) : s.correctPercent}%"></span></div></div><div class="accuracy-value">${s.type === 'essay' ? formatNumber(s.average, 1) + '/' + s.q.points : s.correctPercent + '%'}<small>${s.type === 'essay' ? 'เฉลี่ย' : `ตอบถูก ${s.correct}/${s.total}`}</small></div></div>`).join('')}
+          ${qstats.map(s => `<div class="accuracy-row"><span class="accuracy-num">${s.index + 1}</span><div class="accuracy-copy"><strong>${typeLabel(s.type)} · ${s.q.points} คะแนน</strong><div class="progress-mini"><span style="width:${s.type === 'essay' ? (s.q.points ? Math.round((s.average / s.q.points) * 100) : 0) : s.correctPercent}%"></span></div></div><div class="accuracy-value">${s.type === 'essay' ? formatNumber(s.average, 1) + '/' + s.q.points : s.correctPercent + '%'}<small>${s.type === 'essay' ? 'เฉลี่ย' : `ตอบถูก ${s.correct}/${s.total}`}</small></div></div>`).join('')}
         </div>
       </div>
       <div class="stats-panel">
@@ -2955,17 +2955,18 @@ export function teacherStudentExamView(ctx) {
     return {
       html: teacherShell(session, {
         active: 'students', crumb: 'ไม่พบข้อมูล',
-        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'ยังเปิดรายละเอียดไม่ได้', text: 'นักเรียนหรือชุดสอบอยู่นอกขอบเขตที่คุณดูได้ · ชุดสอบแบบดูอย่างเดียวจะเปิดรายละเอียดเมื่อปิดสอบแล้ว', action: `<a class="btn btn--primary" href="${student ? `#/teacher/student/${student.id}` : '#/teacher/students'}">กลับนามบัตร</a>` })}</div>`
+        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'ยังเปิดรายละเอียดไม่ได้', text: 'นักเรียนหรือชุดสอบอยู่นอกขอบเขตที่คุณดูได้ · ชุดสอบแบบครูท่านอื่นแก้ไขไม่ได้จะเปิดรายละเอียดเมื่อปิดสอบแล้ว', action: `<a class="btn btn--primary" href="${student ? `#/teacher/student/${student.id}` : '#/teacher/students'}">กลับนามบัตร</a>` })}</div>`
       }),
       mount: () => mountTeacherShell(session)
     };
   }
   const attempt = studentExamAttempt(student, exam, db);
   const status = studentExamStatus(exam, attempt);
+  const canInspectQuestions = canManageExam(exam, session) || canEditExam(exam, session) || canReviewExam(exam, session);
   const score = attempt && attempt.status !== 'in_progress' ? attemptScore(exam, attempt) : null;
   const reviewed = attempt && attempt.status !== 'in_progress' ? attempt.reviewed : false;
   const pendingIds = attempt ? new Set(pendingReviewQuestions(exam, attempt).map(q => q.id)) : new Set();
-  const questionRows = attempt ? exam.questions.map((q, index) => {
+  const questionRows = attempt && canInspectQuestions ? exam.questions.map((q, index) => {
     const value = getAnswerValue(attempt, q.id);
     const manual = attempt.manualScores?.[q.id];
     const isShort = q.type === 'short';
@@ -3010,7 +3011,9 @@ export function teacherStudentExamView(ctx) {
           <div><span>ตรวจแล้ว</span><strong>${score.pending.length ? `รอตรวจ ${score.pending.length} ข้อ` : reviewed ? 'ครบแล้ว' : 'รอตรวจ'}</strong></div>
           ${canManageExam(exam, session) ? `<a class="btn btn--ghost btn--sm" href="#/teacher/exam/${exam.id}/answer/${attempt.id}">${icon('clipboard-check', 13)} ไปหน้าตรวจคำตอบ</a>` : ''}
         </div>
-        <div class="student-answer-list">${questionRows}</div>
+        ${canInspectQuestions
+          ? `<div class="student-answer-list">${questionRows}</div>`
+          : `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'ซ่อนรายละเอียดโจทย์และคำตอบ', text: 'เพื่อป้องกันการทุจริต เฉพาะเจ้าของชุดสอบ ผู้จัดการ และผู้ตรวจคำตอบเท่านั้นที่เห็นโจทย์ ตัวเลือก และคำตอบรายข้อ', action: `<a class="btn btn--ghost btn--sm" href="#/teacher/exam/${exam.id}/stats">${icon('chart', 13)} ดูสถิติภาพรวม</a>` })}</div>`}
       </div>`}`;
   return {
     html: teacherShell(session, { active: 'students', crumb: 'รายละเอียดการสอบ', content }),
