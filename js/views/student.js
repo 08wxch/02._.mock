@@ -109,6 +109,7 @@ function syncStudentNoticeBadge() {
   if (toggle) toggle.setAttribute('aria-label', `การแจ้งเตือน${count ? ` ${count} รายการ` : ''}`);
   const head = root.querySelector('.popover__head span');
   if (head) head.textContent = count ? `${count} รายการใหม่` : 'ยังไม่มีการแจ้งเตือน';
+  if (!count) root.querySelector('.popover__head .live-dot')?.remove();
   const list = root.querySelector('.popover__list');
   if (!count && list) list.innerHTML = `<div class="popover__empty">${icon('bell', 26)}<span>ไม่มีการแจ้งเตือนใหม่</span></div>`;
 }
