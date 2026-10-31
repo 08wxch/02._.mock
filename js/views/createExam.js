@@ -1,7 +1,7 @@
 import { icon } from '../icons.js';
 import { e, uid } from '../utils.js';
-import { toast, emptyState, confirmDialog } from '../ui.js';
-import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, isOwnerTeacher, isManagerStaff, canManageOrganizations, findOrganization, examOrganizationIds, examOrganizationName, organizationName, visibleOrganizations } from '../store.js';
+import { toast, emptyState, confirmDialog, openModal, closeModal } from '../ui.js';
+import { getDB, saveDB, findExam, updateExam, deleteExam, classIdsOf, classCodesOf, currentTeacher, canViewExam, canManageExam, canEditExam, visibleStudents, visibleExams, isOwnerTeacher, isManagerStaff, canManageOrganizations, findOrganization, examOrganizationIds, examOrganizationName, organizationName, visibleOrganizations } from '../store.js';
 import { mathText } from '../math.js';
 import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { cloudUploadQuestionImage } from '../cloud.js';
@@ -62,6 +62,32 @@ export function createExamDraft() {
   };
 }
 
+function normalizeDraftQuestion(q = {}) {
+  const type = ['mcq', 'truefalse', 'short', 'essay'].includes(q.type) ? q.type : 'mcq';
+  return {
+    ...q,
+    id: q.id || uid('q'),
+    type,
+    text: q.text || '',
+    points: Number(q.points) || 1,
+    options: type === 'mcq'
+      ? defaultOptions().map((fallback, idx) => ({ ...fallback, ...(q.options?.[idx] || {}), id: fallback.id }))
+      : defaultOptions(),
+    correct: type === 'truefalse' ? String(q.correct ?? 'true') : (q.correct || 'A'),
+    acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.join(', ') : (q.acceptedAnswers || ''),
+    reference: q.reference || q.explanation || '',
+    image: q.image || '',
+    imagePath: q.imagePath || ''
+  };
+}
+
+function isBlankDraftQuestion(q) {
+  if (!q || String(q.text || '').trim() || q.image || q.imagePath) return false;
+  if (Number(q.points) !== (q.type === 'essay' ? 3 : 1)) return false;
+  if (Array.isArray(q.options) && q.options.some(opt => String(opt.text || '').trim() || opt.image)) return false;
+  return !String(q.acceptedAnswers || '').trim() && !String(q.reference || '').trim();
+}
+
 function examToDraft(exam) {
   const db = getDB();
   const examOrgIds = examOrganizationIds(exam, db);
@@ -85,19 +111,7 @@ function examToDraft(exam) {
     passPercent: Number(exam.passPercent) || 60,
     shareMode: exam.shareMode === 'edit' ? 'edit' : 'view',
     assignedStudentIds: assigned,
-    questions: (exam.questions || []).map(q => ({
-      ...q,
-      id: q.id || uid('q'),
-      text: q.text || '',
-      options: q.type === 'mcq'
-        ? defaultOptions().map((fallback, idx) => ({ ...fallback, ...(q.options?.[idx] || {}), id: fallback.id }))
-        : defaultOptions(),
-      correct: q.type === 'truefalse' ? String(q.correct ?? 'true') : (q.correct || 'A'),
-      acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.join(', ') : (q.acceptedAnswers || ''),
-      reference: q.reference || q.explanation || '',
-      image: q.image || '',
-      imagePath: q.imagePath || ''
-    }))
+    questions: (exam.questions || []).map(normalizeDraftQuestion)
   };
 }
 
@@ -146,6 +160,10 @@ function questionEditor(q, index, total) {
   return `<div class="question-builder" data-question-builder="${q.id}">
     <div class="question-builder__head">
       <span class="qb-index">${index + 1}</span>
+      <div class="qb-order" role="group" aria-label="สลับลำดับข้อ">
+        <button class="qb-order__btn" type="button" data-move-question="${q.id}" data-direction="-1" aria-label="เลื่อนข้อ ${index + 1} ขึ้น" title="เลื่อนข้อนี้ขึ้น" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button class="qb-order__btn" type="button" data-move-question="${q.id}" data-direction="1" aria-label="เลื่อนข้อ ${index + 1} ลง" title="เลื่อนข้อนี้ลง" ${index >= total - 1 ? 'disabled' : ''}>↓</button>
+      </div>
       <select class="select" data-q-type="${q.id}" aria-label="ประเภทข้อ ${index + 1}">
         ${typeOptions.map(([value, label]) => `<option value="${value}" ${q.type === value ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
@@ -187,7 +205,7 @@ function questionNavHTML() {
     <span class="question-nav__label">ข้อ</span>
     ${draft.questions.map((q, i) => `<button type="button" role="tab" class="question-nav__item ${q.id === current?.id ? 'is-active' : ''}" data-jump-question="${q.id}" aria-selected="${q.id === current?.id}">${i + 1}</button>`).join('')}
   </div>
-  <div class="question-nav__hint">${icon('edit', 11)} กำลังแก้ข้อ ${draft.questions.findIndex(q => q.id === current?.id) + 1} จาก ${draft.questions.length} · เลือกหมายเลขเพื่อสลับข้อ</div>`;
+  <div class="question-nav__hint">${icon('edit', 11)} กำลังแก้ข้อ ${draft.questions.findIndex(q => q.id === current?.id) + 1} จาก ${draft.questions.length} · เลือกหมายเลขเพื่อแก้ข้อ · ใช้ปุ่ม ↑ ↓ ในหัวข้อเพื่อสลับลำดับ</div>`;
 }
 
 function questionsHTML() {
@@ -205,6 +223,113 @@ function renderQuestions(root) {
   box.innerHTML = questionsHTML();
   root.dataset.previewQuestion = q?.id || '';
   updatePreview(root);
+}
+
+function openCopyQuestionsModal(session, root) {
+  const db = getDB();
+  const sources = visibleExams(session, db)
+    .filter(exam => exam.id !== draft.examId && Array.isArray(exam.questions) && exam.questions.length)
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  if (!sources.length) {
+    toast('ยังไม่มีชุดสอบอื่นที่คัดลอกได้ · บันทึกชุดสอบต้นทางก่อนแล้วลองใหม่', 'info');
+    return;
+  }
+  const typeLabels = { mcq: 'ปรนัย', truefalse: 'ถูก / ผิด', short: 'เติมคำ', essay: 'อัตนัย' };
+  const sourceLabel = exam => {
+    const teacher = db.teachers.find(t => t.id === exam.teacherId);
+    return `${exam.title || 'ชุดสอบไม่มีชื่อ'} · ${exam.code || ''}${teacher ? ` · ${teacher.name}` : ''}`;
+  };
+  const body = `<div class="copy-exam">
+    <div class="field">
+      <label for="copy-source-exam">ชุดสอบต้นทาง</label>
+      <select class="select" id="copy-source-exam" data-copy-source>
+        ${sources.map((exam, index) => `<option value="${index}">${e(sourceLabel(exam))}</option>`).join('')}
+      </select>
+      <span class="field__hint">${icon('info', 12)} เลือกชุดที่บันทึกไว้แล้ว แล้วติ๊กเฉพาะข้อที่ต้องการนำมาใช้ในชุดนี้</span>
+    </div>
+    <div class="copy-exam__toolbar">
+      <strong data-copy-count></strong>
+      <div>
+        <button class="btn btn--link" type="button" data-copy-select-all>เลือกทั้งหมด</button>
+        <span class="dot"></span>
+        <button class="btn btn--link" type="button" data-copy-clear>ล้างที่เลือก</button>
+      </div>
+    </div>
+    <div class="copy-question-list" data-copy-list></div>
+    <div class="form-error" data-copy-error>${icon('alert-circle', 15)}<span></span></div>
+  </div>`;
+  openModal({
+    title: 'คัดลอกข้อสอบจากชุดอื่น',
+    eyebrow: 'นำโจทย์ที่สร้างไว้แล้วมาใช้ซ้ำ',
+    size: 'md',
+    body,
+    footer: `<button class="btn btn--ghost" type="button" data-modal-close>ยกเลิก</button>
+      <button class="btn btn--primary" type="button" data-copy-selected>${icon('copy', 13)} คัดลอกข้อที่เลือก</button>`,
+    onMount(overlay) {
+      const sourceSelect = overlay.querySelector('[data-copy-source]');
+      const list = overlay.querySelector('[data-copy-list]');
+      const count = overlay.querySelector('[data-copy-count]');
+      const error = overlay.querySelector('[data-copy-error]');
+      const selectedButton = overlay.querySelector('[data-copy-selected]');
+      const showError = (message) => {
+        error.querySelector('span').textContent = message;
+        error.classList.add('is-visible');
+      };
+      const currentSource = () => sources[Number(sourceSelect.value) || 0];
+      const checkedIndices = () => [...list.querySelectorAll('[data-copy-question-index]:checked')]
+        .map(input => Number(input.dataset.copyQuestionIndex));
+      const updateCount = () => {
+        const total = currentSource()?.questions?.length || 0;
+        count.textContent = `เลือก ${checkedIndices().length} จาก ${total} ข้อ`;
+      };
+      const renderList = () => {
+        const source = currentSource();
+        const questions = source?.questions || [];
+        list.innerHTML = questions.map((q, index) => {
+          const type = ['mcq', 'truefalse', 'short', 'essay'].includes(q.type) ? q.type : 'mcq';
+          const preview = String(q.text || '').trim();
+          return `<label class="copy-question">
+            <input type="checkbox" data-copy-question-index="${index}" checked>
+            <span class="copy-question__number">${index + 1}</span>
+            <span class="copy-question__body">
+              <strong>${e(preview ? preview.slice(0, 150) : (q.image ? 'ข้อสอบแบบภาพ' : 'ยังไม่มีข้อความโจทย์'))}</strong>
+              <span>${e(typeLabels[type] || type)} · ${Number(q.points) || 1} คะแนน${q.image ? ' · มีภาพประกอบ' : ''}</span>
+            </span>
+          </label>`;
+        }).join('') || `<div class="copy-exam__empty">${icon('file-text', 20)}<span>ชุดนี้ยังไม่มีข้อสอบ</span></div>`;
+        updateCount();
+      };
+      sourceSelect.addEventListener('change', renderList);
+      list.addEventListener('change', updateCount);
+      overlay.querySelector('[data-copy-select-all]')?.addEventListener('click', () => {
+        list.querySelectorAll('[data-copy-question-index]').forEach(input => { input.checked = true; });
+        updateCount();
+      });
+      overlay.querySelector('[data-copy-clear]')?.addEventListener('click', () => {
+        list.querySelectorAll('[data-copy-question-index]').forEach(input => { input.checked = false; });
+        updateCount();
+      });
+      selectedButton.addEventListener('click', () => {
+        const source = currentSource();
+        const indices = checkedIndices();
+        if (!indices.length) { showError('กรุณาติ๊กเลือกข้อที่ต้องการคัดลอกอย่างน้อย 1 ข้อ'); return; }
+        const clones = indices.map(index => {
+          const clone = normalizeDraftQuestion(source.questions[index]);
+          clone.id = uid('q');
+          return clone;
+        });
+        if (draft.questions.length === 1 && isBlankDraftQuestion(draft.questions[0])) draft.questions = [];
+        draft.questions.push(...clones);
+        draft.activeQuestionId = clones[0].id;
+        renderQuestions(root);
+        updateSummary(root);
+        updatePreview(root);
+        closeModal();
+        toast(`คัดลอก ${clones.length} ข้อจาก “${source.title || 'ชุดสอบ'}” แล้ว`, 'success');
+      });
+      renderList();
+    }
+  });
 }
 
 function participantStudents(session, db, orgIds = []) {
@@ -713,6 +838,7 @@ export function createExamView(ctx) {
             <button class="btn btn--ghost" type="button" data-add-question="truefalse">${icon('plus', 12)} ถูก / ผิด</button>
             <button class="btn btn--ghost" type="button" data-add-question="short">${icon('plus', 12)} เติมคำ</button>
             <button class="btn btn--ghost" type="button" data-add-question="essay">${icon('plus', 12)} อัตนัย</button>
+            <button class="btn btn--ghost" type="button" data-copy-from-exam title="คัดลอกโจทย์จากชุดสอบที่บันทึกไว้แล้ว">${icon('copy', 12)} คัดลอกจากชุดอื่น</button>
           </div>
         </section>
         <div class="validation-box" data-validation hidden></div>
@@ -847,6 +973,29 @@ export function createExamView(ctx) {
         updateSummary(root);
       });
       form.addEventListener('click', ev => {
+        const move = ev.target.closest('[data-move-question]');
+        if (move) {
+          syncDraft(root);
+          const id = move.dataset.moveQuestion;
+          const direction = Number(move.dataset.direction) || 0;
+          const index = draft.questions.findIndex(q => q.id === id);
+          const target = index + direction;
+          if (index < 0 || target < 0 || target >= draft.questions.length) return;
+          const [item] = draft.questions.splice(index, 1);
+          draft.questions.splice(target, 0, item);
+          draft.activeQuestionId = item.id;
+          renderQuestions(root);
+          updateSummary(root);
+          updatePreview(root);
+          toast(`สลับข้อ ${index + 1} กับข้อ ${target + 1} แล้ว`, 'success');
+          return;
+        }
+        const copyFromExam = ev.target.closest('[data-copy-from-exam]');
+        if (copyFromExam) {
+          syncDraft(root);
+          openCopyQuestionsModal(session, root);
+          return;
+        }
         const jump = ev.target.closest('[data-jump-question]');
         if (jump) {
           syncDraft(root);
