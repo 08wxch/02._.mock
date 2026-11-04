@@ -68,7 +68,7 @@ export function loginView({ onLogin }) {
         <div class="login-card">
           <span class="eyebrow">สำหรับผู้สร้างแบบสอบถาม</span>
           <h2>เข้าสู่ระบบ</h2>
-          <p class="login-card__lead">ใช้บัญชีเดียวกับระบบ <strong>02._.mock</strong> — บัญชีเริ่มต้นคือ Wich Pitchon</p>
+          <p class="login-card__lead">ใช้บัญชีเดียวกับระบบ <strong>02._.mock</strong></p>
 
           <form class="login-form" data-login-form novalidate>
             <div class="field">
@@ -100,7 +100,7 @@ export function loginView({ onLogin }) {
 
           <div class="login-hint">
             <span class="login-hint__icon">${icon('info', 15)}</span>
-            <p>หากลืมรหัสผ่าน ติดต่อผู้ดูแลระบบเพื่อรีเซ็ตให้ — ผู้ตอบแบบสอบถามไม่ต้องเข้าสู่ระบบ</p>
+            <p>หากลืมรหัสผ่าน ติดต่อผู้ดูแลระบบเพื่อรีเซ็ตรหัสผ่าน</p>
           </div>
 
           ${local ? `<div class="login-demo">

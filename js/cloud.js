@@ -11,6 +11,7 @@ let lastStamp = '';
 let lastAttempts = new Map();
 let lastCredentials = new Map();
 let lastStateCounts = { students: 0, exams: 0 };
+let lastStateMeta = {};
 let lastPeople = new Map();
 let saveQueue = Promise.resolve();
 let saveCount = 0;
@@ -159,6 +160,7 @@ async function loadCloudDB() {
   lastAttempts = new Map(db.attempts.map(a => [a.id, JSON.stringify(a)]));
   lastStamp = stateResult.data.updated_at || '';
   lastStateCounts = countsOf(db);
+  lastStateMeta = db.meta || {};
 
   if (current?.role === 'teacher') {
     const credResult = await supa.from('credentials').select('owner_type,owner_id,password');
@@ -356,16 +358,21 @@ export async function cloudGuestLogin(examId, studentId, password = '') {
 function cleanState(db) {
   const state = { ...db };
   delete state.attempts;
-  state.teachers = (state.teachers || []).map(t => {
-    const next = { ...t };
-    delete next.password;
-    return next;
-  });
-  state.students = (state.students || []).map(s => {
-    const next = { ...s };
-    delete next.password;
-    return next;
-  });
+  delete state.cleanup;
+  state.teachers = (state.teachers || [])
+    .filter(t => t && t.id && !t.deletedAt)
+    .map(t => {
+      const next = { ...t };
+      delete next.password;
+      return next;
+    });
+  state.students = (state.students || [])
+    .filter(s => s && s.id && !s.deletedAt)
+    .map(s => {
+      const next = { ...s };
+      delete next.password;
+      return next;
+    });
   return state;
 }
 
@@ -379,22 +386,94 @@ function attemptRow(attempt) {
   };
 }
 
-async function persistSnapshot(state, attempts) {
+function cleanupIsEmpty(cleanup) {
+  return !cleanup || !['accounts', 'exams', 'students', 'images'].some(key => Array.isArray(cleanup[key]) && cleanup[key].length);
+}
+
+async function processCleanup(cleanup) {
+  const result = { accounts: [], exams: [], students: [], images: [] };
+  if (cleanupIsEmpty(cleanup)) return result;
+  const supa = getClient();
+
+  const images = [...new Set((cleanup.images || []).map(String).filter(Boolean))];
+  for (let i = 0; i < images.length; i += 100) {
+    const chunk = images.slice(i, i + 100);
+    const { error } = await supa.storage.from(QUESTION_IMAGE_BUCKET).remove(chunk);
+    if (error) console.warn('Could not remove question images', error);
+    else result.images.push(...chunk);
+  }
+
+  const examIds = [...new Set((cleanup.exams || []).map(String).filter(Boolean))];
+  if (examIds.length) {
+    const { error } = await supa.from('attempts').delete().in('exam_id', examIds);
+    if (error) console.warn('Could not remove exam attempts', error);
+    else result.exams.push(...examIds);
+  }
+
+  const studentIds = [...new Set((cleanup.students || []).map(String).filter(Boolean))];
+  if (studentIds.length) {
+    const { error } = await supa.from('attempts').delete().in('student_id', studentIds);
+    if (error) console.warn('Could not remove student attempts', error);
+    else result.students.push(...studentIds);
+  }
+
+  for (const account of cleanup.accounts || []) {
+    const role = account?.role === 'student' ? 'student' : account?.role === 'teacher' ? 'teacher' : '';
+    const id = String(account?.id || '');
+    if (!role || !id) continue;
+    let done = false;
+    const { error } = await supa.rpc('delete_app_account', { p_role: role, p_person_id: id });
+    if (!error) {
+      done = true;
+    } else {
+      // The RPC is the authoritative cleanup path. If it is not installed yet,
+      // at least remove the credentials row so the account cannot be reused.
+      console.warn('Account cleanup RPC failed', error);
+      const { error: credError } = await supa.from('credentials').delete()
+        .eq('owner_type', role).eq('owner_id', id);
+      if (credError) console.warn('Could not remove credentials', credError);
+      done = !credError;
+    }
+    if (done) result.accounts.push({ role, id });
+  }
+
+  return result;
+}
+
+function clearProcessedCleanup(db, processed) {
+  if (!db?.cleanup || !processed) return;
+  const accounts = new Set((processed.accounts || []).map(item => `${item.role}:${item.id}`));
+  const exams = new Set(processed.exams || []);
+  const students = new Set(processed.students || []);
+  const images = new Set(processed.images || []);
+  if (Array.isArray(db.cleanup.accounts)) {
+    db.cleanup.accounts = db.cleanup.accounts.filter(item => !accounts.has(`${item.role}:${item.id}`));
+  }
+  if (Array.isArray(db.cleanup.exams)) db.cleanup.exams = db.cleanup.exams.filter(id => !exams.has(id));
+  if (Array.isArray(db.cleanup.students)) db.cleanup.students = db.cleanup.students.filter(id => !students.has(id));
+  if (Array.isArray(db.cleanup.images)) db.cleanup.images = db.cleanup.images.filter(path => !images.has(path));
+}
+
+async function persistSnapshot(state, attempts, cleanup = null) {
   const supa = getClient();
   const nextMap = new Map(attempts.map(a => [a.id, JSON.stringify(a)]));
   lastLocalSaveAt = Date.now();
 
+  const cleaned = await processCleanup(cleanup);
+  const hasExplicitCleanup = !cleanupIsEmpty(cleanup);
+
   if (current?.role === 'teacher') {
     const incoming = countsOf(state);
-    if (isDangerousShrink(incoming, lastStateCounts)) {
+    if (!hasExplicitCleanup && isDangerousShrink(incoming, lastStateCounts)) {
       throw new Error('ปฏิเสธการบันทึก: ข้อมูลนักเรียนหรือชุดสอบลดลงผิดปกติ');
     }
     const { error } = await supa.from('app_state').upsert({ id: 'main', data: cleanState(state) });
     if (error) throw error;
     lastStateCounts = incoming;
+    lastStateMeta = state.meta || {};
     const credentialRows = [
-      ...(state.teachers || []).filter(t => t.password).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
-      ...(state.students || []).filter(s => s.password).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
+      ...(state.teachers || []).filter(t => t.password && !t.deletedAt).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
+      ...(state.students || []).filter(s => s.password && !s.deletedAt).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
     ];
     if (credentialRows.length) {
       const { error: credError } = await supa.from('credentials').upsert(credentialRows);
@@ -421,21 +500,12 @@ async function persistSnapshot(state, attempts) {
   }
 
   const changed = attempts.filter(a => lastAttempts.get(a.id) !== nextMap.get(a.id));
-  // Never mass-delete attempts when the local snapshot has no exams; that is
-  // almost always a partially loaded state, not a teacher deleting everything.
-  const removed = (state.exams || []).length === 0
-    ? []
-    : [...lastAttempts.keys()].filter(id => !nextMap.has(id));
-
   if (changed.length) {
     const { error } = await supa.from('attempts').upsert(changed.map(attemptRow));
     if (error) throw error;
   }
-  if (removed.length && current?.role === 'teacher') {
-    const { error } = await supa.from('attempts').delete().in('id', removed);
-    if (error) throw error;
-  }
   lastAttempts = nextMap;
+  return { cleanup: cleaned };
 }
 
 export async function cloudGetPassword(role, id) {
@@ -508,7 +578,10 @@ export function cloudSave(db) {
   saveCount += 1;
   const state = JSON.parse(JSON.stringify(db));
   const attempts = JSON.parse(JSON.stringify(db.attempts || []));
-  saveQueue = saveQueue.then(() => persistSnapshot(state, attempts)).catch(err => {
+  const cleanup = JSON.parse(JSON.stringify(db.cleanup || {}));
+  saveQueue = saveQueue.then(() => persistSnapshot(state, attempts, cleanup)).then(result => {
+    clearProcessedCleanup(db, result?.cleanup);
+  }).catch(err => {
     console.error('Cloud save failed', err);
     window.dispatchEvent(new CustomEvent('examio:cloud-error', {
       detail: { message: 'บันทึกขึ้นคลาวด์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต' }
@@ -540,7 +613,8 @@ export async function cloudRefresh() {
 
   const db = stateResult.data.data;
   const incoming = countsOf(db);
-  if (isDangerousShrink(incoming, lastStateCounts)) {
+  const remoteCleanup = Boolean(db.meta?.lastCleanupAt && db.meta.lastCleanupAt !== lastStateMeta.lastCleanupAt);
+  if (!remoteCleanup && isDangerousShrink(incoming, lastStateCounts)) {
     console.warn('Rejected partial cloud snapshot', incoming, lastStateCounts);
     window.dispatchEvent(new CustomEvent('examio:cloud-error', {
       detail: { message: 'พบข้อมูลกลางผิดปกติ จึงยังใช้ข้อมูลในเครื่องก่อน' }
@@ -551,6 +625,7 @@ export async function cloudRefresh() {
   lastAttempts = nextMap;
   lastStamp = stamp;
   lastStateCounts = incoming;
+  lastStateMeta = db.meta || {};
   rememberPeople(db);
   return db;
 }

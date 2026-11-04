@@ -1367,6 +1367,65 @@ export function updateTeacherOrg(teacherId, nextOrgId, actor = null) {
   return { ok: true, teacher, organization: org };
 }
 
+function cleanupBucket(db) {
+  if (!db.cleanup || typeof db.cleanup !== 'object') db.cleanup = {};
+  if (!db.meta || typeof db.meta !== 'object') db.meta = {};
+  db.meta.lastCleanupAt = new Date().toISOString();
+  ['accounts', 'exams', 'students', 'images'].forEach(key => {
+    if (!Array.isArray(db.cleanup[key])) db.cleanup[key] = [];
+  });
+  return db.cleanup;
+}
+
+function queueAccountCleanup(db, role, id) {
+  if (!id) return;
+  const bucket = cleanupBucket(db);
+  if (!bucket.accounts.some(item => item.role === role && item.id === id)) {
+    bucket.accounts.push({ role, id, at: new Date().toISOString() });
+  }
+}
+
+function queueStudentCleanup(db, id) {
+  if (!id) return;
+  const bucket = cleanupBucket(db);
+  if (!bucket.students.includes(id)) bucket.students.push(id);
+}
+
+function imagePathsOf(exam) {
+  const paths = [];
+  (exam?.questions || []).forEach(question => {
+    if (question?.imagePath) paths.push(String(question.imagePath));
+    (question?.options || []).forEach(option => {
+      if (option?.imagePath) paths.push(String(option.imagePath));
+    });
+  });
+  return [...new Set(paths.filter(Boolean))];
+}
+
+function queueExamCleanup(db, exam) {
+  if (!exam?.id) return { images: 0 };
+  const bucket = cleanupBucket(db);
+  if (!bucket.exams.includes(exam.id)) bucket.exams.push(exam.id);
+  const paths = imagePathsOf(exam);
+  paths.forEach(path => {
+    if (!bucket.images.includes(path)) bucket.images.push(path);
+  });
+  return { images: paths.length };
+}
+
+function dropExamRecord(db, exam) {
+  if (!exam) return { attempts: 0, images: 0 };
+  const attempts = db.attempts.filter(attempt => attempt.examId === exam.id).length;
+  const queued = queueExamCleanup(db, exam);
+  db.exams = db.exams.filter(item => item.id !== exam.id);
+  db.attempts = db.attempts.filter(attempt => attempt.examId !== exam.id);
+  db.notices = (db.notices || []).filter(notice => {
+    const href = String(notice.href || '');
+    return !href.includes(`/exam/${exam.id}`) && notice.target !== `exam:${exam.id}`;
+  });
+  return { attempts, images: queued.images };
+}
+
 export function removeTeacher(teacherId, actor = null) {
   const db = getDB();
   const teacher = db.teachers.find(t => t.id === teacherId && !t.deletedAt);
@@ -1377,10 +1436,31 @@ export function removeTeacher(teacherId, actor = null) {
   const globalManager = canManageOrganizations(actor);
   if (!owner && !globalManager) return { ok: false, error: 'เฉพาะ Wich หรือผู้จัดการในหน่วยงานที่มีสิทธิ์จัดการองค์กรเท่านั้นที่ลบบัญชีได้' };
   if (!owner && teacher.staffRole !== 'teacher') return { ok: false, error: 'ลบได้เฉพาะบัญชีครูผู้สอน' };
-  teacher.deletedAt = new Date().toISOString();
-  teacher.deletedBy = actor.teacherId;
+
+  const exams = db.exams.filter(exam => exam.teacherId === teacher.id);
+  let attempts = 0;
+  let images = 0;
+  exams.forEach(exam => {
+    const removed = dropExamRecord(db, exam);
+    attempts += removed.attempts;
+    images += removed.images;
+  });
+  db.exams.forEach(exam => {
+    if (Array.isArray(exam.reviewerIds)) {
+      exam.reviewerIds = exam.reviewerIds.filter(id => id !== teacher.id);
+    }
+  });
+  db.teachers = db.teachers.filter(t => t.id !== teacher.id);
+  if (db.teacher?.id === teacher.id) delete db.teacher;
+  db.notices = (db.notices || []).filter(notice => notice.target !== `teacher:${teacher.id}`);
+  if (db.noticeReads && typeof db.noticeReads === 'object') delete db.noticeReads[teacher.id];
+  queueAccountCleanup(db, 'teacher', teacher.id);
   saveDB();
-  return { ok: true, teacher };
+  return {
+    ok: true,
+    teacher,
+    removed: { exams: exams.length, attempts, images }
+  };
 }
 
 export function updateExam(examId, updates = {}, actor = null) {
@@ -1398,15 +1478,9 @@ export function deleteExam(examId, actor = null) {
   const exam = db.exams.find(e => e.id === examId);
   if (!exam) return { ok: false, error: 'ไม่พบชุดสอบ' };
   if (!canManageExam(exam, actor)) return { ok: false, error: 'เฉพาะเจ้าของชุดสอบและ Wich Pitchon เท่านั้นที่ลบได้' };
-  const attempts = db.attempts.filter(a => a.examId === examId).length;
-  db.exams = db.exams.filter(e => e.id !== examId);
-  db.attempts = db.attempts.filter(a => a.examId !== examId);
-  db.notices = (db.notices || []).filter(n => {
-    const href = String(n.href || '');
-    return !href.includes(`/exam/${examId}`) && n.target !== `exam:${examId}`;
-  });
+  const removed = dropExamRecord(db, exam);
   saveDB();
-  return { ok: true, title: exam.title, code: exam.code, attempts };
+  return { ok: true, title: exam.title, code: exam.code, attempts: removed.attempts, images: removed.images };
 }
 
 
@@ -1700,6 +1774,14 @@ export function deleteOrganization(orgId, actor = null) {
   if (db.noticeReads && typeof db.noticeReads === 'object') {
     studentIds.forEach(id => { delete db.noticeReads[id]; });
   }
+  teachers.forEach(t => queueAccountCleanup(db, 'teacher', t.id));
+  students.forEach(st => {
+    queueStudentCleanup(db, st.id);
+    queueAccountCleanup(db, 'student', st.id);
+  });
+  exams.forEach(exam => {
+    if (removedExamIds.has(exam.id)) queueExamCleanup(db, exam);
+  });
   saveDB();
   return {
     ok: true,
@@ -1845,7 +1927,15 @@ export function removeStudent(studentId, actor = null) {
   const attempts = db.attempts.filter(a => a.studentId === studentId).length;
   db.students = db.students.filter(s => s.id !== studentId);
   db.attempts = db.attempts.filter(a => a.studentId !== studentId);
+  db.exams.forEach(exam => {
+    if (Array.isArray(exam.assignedStudentIds)) {
+      exam.assignedStudentIds = exam.assignedStudentIds.filter(id => id !== studentId);
+    }
+  });
   db.notices = (db.notices || []).filter(n => n.target !== `student:${studentId}`);
+  if (db.noticeReads && typeof db.noticeReads === 'object') delete db.noticeReads[studentId];
+  queueStudentCleanup(db, studentId);
+  queueAccountCleanup(db, 'student', studentId);
   saveDB();
   return { ok: true, name: student.name, attempts };
 }

@@ -1,7 +1,7 @@
-import { listPeople, createAccount, changePassword, resetPassword } from '../cloud.js';
+import { listPeople, createAccount } from '../cloud.js';
 import { icon } from '../icons.js';
 import { avatar, toast, openModal, closeModal, emptyState } from '../ui.js';
-import { e, thaiDate, formatNumber, pluralThai } from '../utils.js';
+import { e, thaiDate, formatNumber, pluralThai, examAppUrl } from '../utils.js';
 
 function passwordField(id, label, placeholder = 'อย่างน้อย 4 ตัวอักษร') {
   return `<div class="field">
@@ -24,63 +24,13 @@ function bindPasswordToggles(root) {
   }));
 }
 
-function openPasswordModal({ title, eyebrow, description, onSubmit }) {
-  const modal = openModal({
-    title,
-    eyebrow,
-    size: 'sm',
-    body: `<div class="modal-form">
-      <p class="modal__message">${e(description)}</p>
-      ${passwordField('new-password', 'รหัสผ่านใหม่')}
-      ${passwordField('confirm-password', 'ยืนยันรหัสผ่านใหม่', 'พิมพ์รหัสผ่านอีกครั้ง')}
-      <div class="form-error" data-pass-error>${icon('alert-circle', 15)}<span></span></div>
-    </div>`,
-    footer: `<button class="btn btn--ghost" type="button" data-modal-dismiss>ยกเลิก</button>
-      <button class="btn btn--primary" type="button" data-save-password>${icon('check', 16)} บันทึกรหัสผ่าน</button>`,
-    onMount: root => {
-      bindPasswordToggles(root);
-      const error = root.querySelector('[data-pass-error]');
-      const showError = message => {
-        error.querySelector('span').textContent = message;
-        error.classList.add('is-visible');
-      };
-      const button = root.querySelector('[data-save-password]');
-      button.addEventListener('click', async () => {
-        const pass = root.querySelector('#new-password').value;
-        const confirm = root.querySelector('#confirm-password').value;
-        error.classList.remove('is-visible');
-        if (pass.length < 4) {
-          showError('รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร');
-          return;
-        }
-        if (pass !== confirm) {
-          showError('รหัสผ่านทั้งสองช่องไม่ตรงกัน');
-          return;
-        }
-        button.disabled = true;
-        button.classList.add('is-loading');
-        try {
-          await onSubmit(pass);
-          closeModal();
-          toast('เปลี่ยนรหัสผ่านแล้ว', 'success');
-        } catch (err) {
-          showError(err?.message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
-          button.disabled = false;
-          button.classList.remove('is-loading');
-        }
-      });
-    }
-  });
-  return modal;
-}
-
 function openCreateModal({ session, onCreated }) {
   openModal({
     title: 'สร้างบัญชีผู้ใช้',
     eyebrow: 'เพิ่มผู้สร้างแบบสอบถาม',
     size: 'sm',
     body: `<div class="modal-form">
-      <p class="modal__message">บัญชีใหม่จะใช้เข้าสู่ระบบด้วย <b>ชื่อ–นามสกุล</b> หรือ <b>รหัสผู้ใช้</b> ที่กำหนด และใช้ระบบเดียวกับ 02._.mock</p>
+      <p class="modal__message">บัญชีใหม่จะใช้เข้าสู่ระบบด้วย <b>ชื่อ–นามสกุล</b> หรือ <b>รหัสผู้ใช้</b> ที่กำหนด และใช้ระบบเดียวกับ 02._.mock · หลังสร้างแล้ว การเปลี่ยนรหัสผ่านทำที่ 02._.mock</p>
       <div class="field">
         <label class="field__label" for="account-name">ชื่อ–นามสกุล</label>
         <div class="input-wrap">${icon('user', 16)}<input class="input" id="account-name" type="text" placeholder="เช่น ครูสมชาย ใจดี" autocomplete="off" maxlength="120"></div>
@@ -129,6 +79,7 @@ function openCreateModal({ session, onCreated }) {
 }
 
 export async function accountsView({ session }) {
+  const examUrl = examAppUrl();
   let people = await listPeople();
   const self = people.find(person => person.userId === session.userId) || {
     userId: session.userId,
@@ -146,12 +97,12 @@ export async function accountsView({ session }) {
       <div class="dash-hero__copy">
         <span class="eyebrow">${session.isAdmin ? 'ผู้ดูแลและทีมงาน' : 'บัญชีของฉัน'}</span>
         <h1>บัญชีผู้ใช้</h1>
-        <p>${session.isAdmin ? 'จัดการบัญชีผู้สร้างแบบสอบถาม เปลี่ยนรหัสผ่าน และดูว่าใครสร้างฟอร์มอะไรไว้บ้าง' : 'เปลี่ยนรหัสผ่านของคุณ และดูภาพรวมแบบสอบถามที่คุณสร้าง'}</p>
+        <p>${session.isAdmin ? 'จัดการบัญชีผู้สร้างแบบสอบถาม และดูว่าใครสร้างฟอร์มอะไรไว้บ้าง' : 'ดูภาพรวมแบบสอบถามที่คุณสร้าง และจัดการบัญชีของตนเอง'}</p>
       </div>
       <div class="dash-hero__actions">
         ${session.isAdmin
           ? `<button class="btn btn--primary" type="button" data-create>${icon('user-plus', 16)} สร้างบัญชี</button>`
-          : `<span class="badge badge--neutral">${icon('shield-check', 12)} เปลี่ยนรหัสผ่านได้ด้วยตัวเอง</span>`}
+          : `<span class="badge badge--neutral">${icon('shield-check', 12)} รหัสผ่านจัดการที่ 02._.mock</span>`}
       </div>
     </header>
 
@@ -165,7 +116,7 @@ export async function accountsView({ session }) {
         </div>
       </div>
       <div class="account-self__actions">
-        <button class="btn btn--ghost" type="button" data-change-own>${icon('key', 16)} เปลี่ยนรหัสผ่าน</button>
+        <a class="btn btn--ghost" href="${examUrl}" target="_blank" rel="noopener">${icon('external-link', 16)} ไปเปลี่ยนรหัสที่ 02._.mock</a>
       </div>
     </section>
 
@@ -182,9 +133,9 @@ export async function accountsView({ session }) {
       </div>
       <div class="team-list" data-team-list></div>
       <div data-team-empty></div>
-    </section>` : `<div class="notice notice--info">${icon('info', 16)}<span>เฉพาะผู้ดูแลระบบเท่านั้นที่ดูและจัดการบัญชีทั้งหมดได้ — คุณยังเปลี่ยนรหัสผ่านของตัวเองได้ตามปกติ</span></div>`}
+    </section>` : `<div class="notice notice--info">${icon('info', 16)}<span>เฉพาะผู้ดูแลระบบเท่านั้นที่ดูและจัดการบัญชีทั้งหมดได้ — รหัสผ่านของทุกบัญชีเปลี่ยนได้ที่ระบบ 02._.mock</span></div>`}
 
-    <div class="account-note">${icon('shield-check', 15)} บัญชีทั้งหมดใช้ระบบเดียวกับ 02._.mock และถูกป้องกันด้วยสิทธิ์ระดับฐานข้อมูล</div>
+    <div class="account-note">${icon('shield-check', 15)} บัญชีทั้งหมดใช้ระบบเดียวกับ 02._.mock · เปลี่ยนหรือรีเซ็ตรหัสผ่านได้ที่ 02._.mock เท่านั้น</div>
   </div>`;
 
   function personRow(person) {
@@ -198,7 +149,6 @@ export async function accountsView({ session }) {
       <span class="team-row__forms">${icon('clipboard-list', 14)} ${pluralThai(Number(person.formCount || 0), 'แบบสอบถาม')}</span>
       <div class="team-row__actions">
         <a class="btn btn--ghost btn--sm" href="#/?creator=${person.userId}">${icon('eye', 14)} ดูฟอร์ม</a>
-        ${session.isAdmin && !isSelf ? `<button class="btn btn--ghost btn--sm" type="button" data-reset="${person.userId}" title="รีเซ็ตรหัสผ่านให้ ${e(person.name)}">${icon('key', 14)} รีเซ็ตรหัส</button>` : ''}
       </div>
     </div>`;
   }
@@ -216,16 +166,6 @@ export async function accountsView({ session }) {
     }
     empty.innerHTML = '';
     list.innerHTML = filtered.map(personRow).join('');
-    list.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
-      const person = people.find(item => item.userId === btn.dataset.reset);
-      if (!person) return;
-      openPasswordModal({
-        title: `รีเซ็ตรหัสผ่านของ ${person.name}`,
-        eyebrow: 'รีเซ็ตรหัสผ่าน',
-        description: 'กำหนดรหัสผ่านใหม่ให้บัญชีนี้ ผู้ใช้จะเข้าสู่ระบบด้วยรหัสใหม่ทันที',
-        onSubmit: async password => { await resetPassword(person, password); }
-      });
-    }));
   }
 
   function mount(root) {
@@ -251,15 +191,6 @@ export async function accountsView({ session }) {
           refreshStats();
           renderTeam(root.querySelector('[data-team-search]')?.value || '');
         }
-      });
-    });
-
-    root.querySelector('[data-change-own]')?.addEventListener('click', () => {
-      openPasswordModal({
-        title: 'เปลี่ยนรหัสผ่านของคุณ',
-        eyebrow: 'ความปลอดภัยของบัญชี',
-        description: 'เมื่อเปลี่ยนแล้ว ให้ใช้รหัสผ่านใหม่ในการเข้าสู่ระบบครั้งถัดไป',
-        onSubmit: async password => { await changePassword(session, password); }
       });
     });
 

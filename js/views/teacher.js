@@ -466,7 +466,7 @@ export function teacherExamsView(ctx) {
 function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false, canReview = false, canRemind = false } = {}) {
   const meta = statusMeta(exam.status);
   const creator = creatorOfExam(exam);
-  const shareLabel = exam.shareMode === 'edit' ? 'ครูอื่นแก้ไขได้' : 'ครูอื่นแก้ไขไม่ได้';
+  const shareLabel = exam.shareMode === 'edit' ? 'ครูท่านอื่นแก้ไขได้' : 'ครูท่านอื่นแก้ไขไม่ได้';
   return `<a class="page-back" href="#/teacher/exams">${icon('arrow-left', 15)} กลับชุดสอบทั้งหมด</a>
   <div class="exam-admin-head">
     <div class="exam-admin-head__main">
@@ -516,7 +516,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
     ${canReview ? `<a class="exam-tab ${tab === 'grading' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/grading">${icon('clipboard-check', 13)} ตรวจคำตอบ ${metrics.pendingReview ? `<span class="exam-tab__count exam-tab__count--alert">${metrics.pendingReview}</span>` : ''}</a>` : ''}
     ${canViewStats ? `<a class="exam-tab ${tab === 'stats' ? 'is-active' : ''}" href="#/teacher/exam/${exam.id}/stats">${icon('chart', 13)} สถิติ</a>` : ''}
   </div>
-  ${!canViewStats ? `<div class="exam-stats-locked">${icon('lock', 13)} ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นแก้ไขไม่ได้ · สถิติจะเปิดให้ดูเมื่อปิดสอบแล้ว</div>` : ''}`;
+  ${!canViewStats ? `<div class="exam-stats-locked">${icon('lock', 13)} ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นไม่สามารถแก้ไขได้ · สถิติจะเปิดให้ดูเมื่อปิดสอบแล้ว</div>` : ''}`;
 }
 
 function overviewTab(exam, metrics, canManage = false, canViewStats = true, canReview = false) {
@@ -540,7 +540,7 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true, canR
         <div class="overview-metric"><span>${icon('users', 11)} ผู้เข้าสอบ</span><strong>${metrics.total} <small>คน</small></strong></div>
       </div>
       <section class="overview-panel card exam-overview-locked">
-        ${emptyState({ iconName: 'lock', title: 'สถิติถูกซ่อนไว้', text: 'ชุดสอบนี้แชร์แบบครูท่านอื่นแก้ไขไม่ได้ · สถิติและรายละเอียดคำตอบจะเปิดให้ดูเมื่อปิดรับคำตอบแล้ว', action: `<a class="btn btn--ghost btn--sm" href="#/teacher/exams">กลับชุดสอบทั้งหมด</a>` })}
+        ${emptyState({ iconName: 'lock', title: 'สถิติถูกซ่อนไว้', text: 'ชุดสอบนี้แชร์แบบครูท่านอื่นไม่สามารถแก้ไขได้ · สถิติและรายละเอียดคำตอบจะเปิดให้ดูเมื่อปิดรับคำตอบแล้ว', action: `<a class="btn btn--ghost btn--sm" href="#/teacher/exams">กลับชุดสอบทั้งหมด</a>` })}
       </section>`
     : `<div class="overview-metrics">
         <div class="overview-metric"><span>${icon('users', 11)} ผู้เข้าสอบ</span><strong>${metrics.total} <small>คน</small></strong></div>
@@ -586,7 +586,7 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true, canR
           <div class="overview-info-row"><span>${icon('check-circle', 11)} เกณฑ์ผ่าน</span><strong>${exam.passPercent}%</strong></div>
           <div class="overview-info-row"><span>${icon('calendar', 11)} เริ่มสอบ</span><strong>${thaiDateTime(exam.openAt)}</strong></div>
           <div class="overview-info-row"><span>${icon('timer', 11)} ปิดรับ</span><strong>${thaiDateTime(exam.closeAt)}</strong></div>
-          <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์การเข้าถึง</span><strong>${exam.shareMode === 'edit' ? 'แก้ไขได้' : 'แก้ไขไม่ได้'}</strong></div>
+          <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์การเข้าถึง</span><strong>${exam.shareMode === 'edit' ? 'ครูท่านอื่นสามารถแก้ไขได้' : 'ครูท่านอื่นไม่สามารถแก้ไขได้'}</strong></div>
         </div>
       </div>
       <div class="overview-panel card">
@@ -2579,7 +2579,9 @@ function openStaffDetailModal(teacherId, session) {
   }
   const org = findOrganization(teacher.orgId, db);
   const roleLabel = teacher.roleLabel || (teacher.isOwner ? 'ผู้สร้างระบบ' : teacher.staffRole === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน');
-  const examCount = db.exams.filter(exam => exam.teacherId === teacher.id).length;
+  const teacherExamIds = new Set(db.exams.filter(exam => exam.teacherId === teacher.id).map(exam => exam.id));
+  const examCount = teacherExamIds.size;
+  const attemptCount = db.attempts.filter(attempt => teacherExamIds.has(attempt.examId)).length;
   const canDelete = owner ? !teacher.isOwner : canManageStaff && !teacher.isOwner && teacher.staffRole === 'teacher' && (canManageOrgs || teacher.orgId === me?.orgId) && teacher.id !== me?.id;
   const canMove = (owner || canManageOrgs) && !teacher.isOwner;
   const canEditCode = !teacher.isOwner && (owner || (canManageStaff
@@ -2642,7 +2644,7 @@ function openStaffDetailModal(teacherId, session) {
       </form>` : ''}
       <p class="account-profile__hint">${icon('shield-check', 12)} ${canManageStaff
         ? (canMove
-          ? 'จัดการรหัส หน่วยงาน และลบบัญชีได้ · รหัสของ Wich ถูกป้องกัน · การลบจะซ่อนบัญชีแต่เก็บประวัติชุดสอบไว้'
+          ? 'จัดการรหัส หน่วยงาน และลบบัญชีได้ · รหัสของ Wich ถูกป้องกัน · การลบบัญชีจะลบชุดสอบและผลสอบของครูคนนี้ทั้งหมด'
           : 'จัดการรหัสและลบบัญชีครูในหน่วยงานของตนเองได้ · รหัสของ Wich ถูกป้องกัน')
         : 'บัญชีครูดูข้อมูลได้อย่างเดียว · เฉพาะผู้จัดการหน่วยงานที่มีสิทธิ์จึงจะจัดการบัญชีได้'}</p>
     </div>`,
@@ -2743,8 +2745,8 @@ function openStaffDetailModal(teacherId, session) {
       overlay.querySelector('[data-staff-delete]')?.addEventListener('click', async () => {
         const ok = await confirmDialog({
           title: 'ลบบัญชีครู?',
-          message: `บัญชี ${teacher.name} จะถูกซ่อนและเข้าสู่ระบบไม่ได้อีก · ชุดสอบและผลสอบเดิมยังอยู่ในหน่วยงาน`,
-          confirmLabel: 'ลบบัญชี',
+          message: `บัญชี ${teacher.name} จะถูกลบถาวร พร้อมชุดสอบ ${examCount} ชุด และผลสอบ ${attemptCount} รายการ · การลบนี้ย้อนกลับไม่ได้`,
+          confirmLabel: 'ลบบัญชีและข้อมูล',
           tone: 'danger',
           iconName: 'trash'
         });
@@ -2752,7 +2754,7 @@ function openStaffDetailModal(teacherId, session) {
         const result = removeTeacher(teacher.id, session);
         if (!result.ok) { toast(result.error || 'ลบบัญชีไม่สำเร็จ', 'error'); return; }
         closeModal();
-        toast(`ลบบัญชี ${teacher.name} แล้ว`, 'success');
+        toast(`ลบบัญชี ${teacher.name} และข้อมูลที่เกี่ยวข้องแล้ว`, 'success');
         refreshRoute();
       });
     }

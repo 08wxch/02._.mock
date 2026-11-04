@@ -183,6 +183,10 @@ export function baseUrl() {
   return `${url.origin}${path}`;
 }
 
+export function examAppUrl() {
+  return new URL('../', baseUrl()).href;
+}
+
 export function publicLink(slug) {
   const local = new URLSearchParams(location.search).has('local') ? '?local=1' : '';
   return `${baseUrl()}${local}#/f/${slug}`;
