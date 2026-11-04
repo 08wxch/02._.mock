@@ -133,7 +133,7 @@ export async function accountsView({ session }) {
       </div>
       <div class="team-list" data-team-list></div>
       <div data-team-empty></div>
-    </section>` : `<div class="notice notice--info">${icon('info', 16)}<span>เฉพาะผู้ดูแลระบบเท่านั้นที่ดูและจัดการบัญชีทั้งหมดได้ — รหัสผ่านของทุกบัญชีเปลี่ยนได้ที่ระบบ 02._.mock</span></div>`}
+    </section>` : ''}
 
     <div class="account-note">${icon('shield-check', 15)} บัญชีทั้งหมดใช้ระบบเดียวกับ 02._.mock · เปลี่ยนหรือรีเซ็ตรหัสผ่านได้ที่ 02._.mock เท่านั้น</div>
   </div>`;
