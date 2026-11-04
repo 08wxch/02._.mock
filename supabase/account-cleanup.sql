@@ -100,6 +100,7 @@ begin
 end;
 $$;
 
+revoke all on function public.delete_app_account(text, text) from anon;
 revoke all on function public.delete_app_account(text, text) from public;
 grant execute on function public.delete_app_account(text, text) to authenticated;
 
