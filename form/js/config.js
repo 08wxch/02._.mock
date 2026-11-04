@@ -24,6 +24,8 @@ export const SESSION_KEY = 'formio_session_v1';
 export const LOCAL_DB_KEY = 'formio_local_db_v1';
 
 export const QUESTION_TYPES = [
+  { value: 'section', label: 'ส่วน / ขึ้นหน้าใหม่', hint: 'แบ่งแบบสอบถามออกเป็นส่วน ๆ', icon: 'layout-dashboard' },
+  { value: 'content', label: 'ข้อความ / รูปภาพ', hint: 'แสดงข้อความหรือรูป โดยไม่ต้องตอบ', icon: 'file-text' },
   { value: 'short', label: 'ข้อความสั้น', hint: 'คำตอบสั้น ๆ บรรทัดเดียว', icon: 'type' },
   { value: 'paragraph', label: 'ข้อความยาว', hint: 'คำตอบหลายบรรทัด', icon: 'align-left' },
   { value: 'radio', label: 'ตัวเลือกเดียว', hint: 'เลือกได้เพียงข้อเดียว', icon: 'circle-dot' },

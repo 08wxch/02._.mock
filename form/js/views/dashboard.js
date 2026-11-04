@@ -3,6 +3,7 @@ import { icon } from '../icons.js';
 import { avatar, toast, confirmDialog, emptyState } from '../ui.js';
 import { openQrModal, openShareModal, shareUrl } from '../shareKit.js';
 import { statusBadge } from '../layout.js';
+import { isAnswerable } from '../questionRenderer.js';
 import {
   e, statusOf, windowLabel, formatNumber, relativeTime, thaiDate, publicLink
 } from '../utils.js';
@@ -31,7 +32,7 @@ function cardMarkup(form, session, peopleById) {
   const owner = peopleById.get(form.ownerId) || { name: form.ownerName };
   const results = canSeeResults(form, session);
   const editable = ownsForm(form, session) || session.isAdmin;
-  const questions = form.questions?.length || 0;
+  const questions = (form.questions || []).filter(question => isAnswerable(question.type)).length;
   const responses = Number(form.responseCount || 0);
   const shareable = form.status !== 'draft';
   const detailHref = !shareable && editable

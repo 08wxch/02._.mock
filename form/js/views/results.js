@@ -8,7 +8,7 @@ import {
   e, thaiDateTime, relativeTime, formatNumber, percent, toCsv, downloadBlob,
   safeFilename, statusOf, windowLabel
 } from '../utils.js';
-import { normalizeQuestion } from '../questionRenderer.js';
+import { normalizeQuestion, isAnswerable } from '../questionRenderer.js';
 import { TYPE_LABEL } from '../config.js';
 
 function isAnswered(value) {
@@ -147,7 +147,7 @@ export async function resultsView({ session, formId }) {
     };
   }
 
-  const questions = (form.questions || []).map(normalizeQuestion);
+  const questions = (form.questions || []).map(normalizeQuestion).filter(question => isAnswerable(question.type));
   let responses = await listResponses(formId);
   let tab = 'summary';
   let search = '';

@@ -246,3 +246,55 @@ export function answerPreview(answer) {
   if (answer === null || answer === undefined || answer === '') return '—';
   return String(answer);
 }
+
+// Read an image file, resize it in the browser and return a compressed data URL.
+// Keeping the image inside the survey JSON means deleting the survey also
+// deletes its images, with no extra storage bucket to configure.
+export async function imageFileToDataUrl(file, { maxDimension = 1400, quality = 0.82 } = {}) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('กรุณาเลือกไฟล์รูปภาพ');
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error('รูปใหญ่เกิน 8 MB กรุณาเลือกรูปที่เล็กลง');
+  }
+
+  const readOriginal = () => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('อ่านไฟล์รูปภาพไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+
+  if (file.type === 'image/gif' && file.size <= 2 * 1024 * 1024) return readOriginal();
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('เปิดไฟล์รูปภาพไม่สำเร็จ'));
+      img.src = objectUrl;
+    });
+    let width = image.naturalWidth || image.width;
+    let height = image.naturalHeight || image.height;
+    if (!width || !height) return readOriginal();
+    const ratio = Math.min(1, maxDimension / Math.max(width, height));
+    width = Math.max(1, Math.round(width * ratio));
+    height = Math.max(1, Math.round(height * ratio));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return readOriginal();
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL('image/jpeg', quality);
+  } catch (error) {
+    if (error?.message === 'เปิดไฟล์รูปภาพไม่สำเร็จ') throw error;
+    return readOriginal();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

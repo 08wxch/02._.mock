@@ -6,9 +6,12 @@ import { toast, confirmDialog, openModal, avatar } from '../ui.js';
 import { qrSvg, downloadQrCard } from '../qr.js';
 import { shareUrl } from '../shareKit.js';
 import {
-  e, uid, datetimeLocalValue, fromDatetimeLocal, statusOf, thaiDateTime, safeFilename, formatNumber
+  e, uid, datetimeLocalValue, fromDatetimeLocal, statusOf, thaiDateTime, safeFilename, formatNumber,
+  imageFileToDataUrl
 } from '../utils.js';
-import { questionInputMarkup, normalizeQuestion, isChoice, newQuestion } from '../questionRenderer.js';
+import {
+  questionInputMarkup, normalizeQuestion, isChoice, isAnswerable, newQuestion
+} from '../questionRenderer.js';
 import { navigate } from '../app.js';
 
 const DEFAULT_CONFIRMATION = 'ขอบคุณที่สละเวลาตอบแบบสอบถาม ความคิดเห็นของคุณมีความหมายกับเรามาก';
@@ -29,7 +32,35 @@ function optionRows(question) {
   </div>`;
 }
 
+function contentImageEditor(question) {
+  const image = question.image?.url
+    ? `<figure class="content-image content-image--editor">
+        <img src="${e(question.image.url)}" alt="${e(question.image.name || 'รูปประกอบ')}" loading="lazy">
+        <div class="content-image__actions">
+          <label class="btn btn--ghost btn--sm content-upload">
+            ${icon('upload', 14)} เปลี่ยนรูป
+            <input type="file" data-image-input accept="image/*" hidden>
+          </label>
+          <button class="btn btn--ghost btn--sm btn--danger-text" type="button" data-remove-image>${icon('trash', 14)} ลบรูป</button>
+        </div>
+      </figure>`
+    : `<div class="content-image-empty">
+        <span class="content-image-empty__icon">${icon('upload', 22)}</span>
+        <span>ยังไม่มีรูปประกอบ</span>
+        <label class="btn btn--ghost btn--sm content-upload">
+          ${icon('upload', 14)} อัปโหลดรูป
+          <input type="file" data-image-input accept="image/*" hidden>
+        </label>
+      </div>`;
+  return `<div class="content-editor">
+    ${image}
+    <p class="content-editor__hint">${icon('info', 12)} รูปจะถูกเก็บไว้ในแบบสอบถาม และถูกลบไปพร้อมแบบสอบถาม — รองรับ JPG, PNG, WEBP ไม่เกิน 8 MB</p>
+  </div>`;
+}
+
 function typeEditor(question) {
+  if (question.type === 'section') return '';
+  if (question.type === 'content') return contentImageEditor(question);
   if (isChoice(question.type)) return optionRows(question);
   if (question.type === 'yesno') {
     return `<div class="q-static">
@@ -63,30 +94,48 @@ function typeEditor(question) {
   </div>`;
 }
 
-function questionCard(question, index, total) {
-  return `<article class="q-card" data-qid="${question.id}">
+function questionCard(question, index, total, answerNumber = null) {
+  const block = !isAnswerable(question.type);
+  const isSectionBlock = question.type === 'section';
+  const isContentBlock = question.type === 'content';
+  const titlePlaceholder = isSectionBlock
+    ? 'ชื่อส่วน เช่น ข้อมูลทั่วไป'
+    : isContentBlock
+      ? 'หัวข้อข้อความ (ไม่บังคับ)'
+      : 'พิมพ์คำถามของคุณ…';
+  const descriptionPlaceholder = isSectionBlock
+    ? 'คำอธิบายส่วน (ไม่บังคับ)'
+    : isContentBlock
+      ? 'พิมพ์ข้อความที่ต้องการให้ผู้ตอบอ่าน…'
+      : 'คำอธิบายเพิ่มเติม (ไม่บังคับ)';
+  const descriptionField = block
+    ? `<textarea class="q-desc-input q-desc-input--area" data-q-desc rows="${isContentBlock ? 4 : 2}" placeholder="${descriptionPlaceholder}" aria-label="${descriptionPlaceholder}">${e(question.description)}</textarea>`
+    : `<input class="q-desc-input" type="text" data-q-desc value="${e(question.description)}" placeholder="${descriptionPlaceholder}" aria-label="${descriptionPlaceholder}">`;
+  return `<article class="q-card ${block ? `q-card--block q-card--${question.type}` : ''}" data-qid="${question.id}">
     <div class="q-card__top">
-      <span class="q-card__num">${String(index + 1).padStart(2, '0')}</span>
+      <span class="q-card__num ${block ? 'q-card__num--block' : ''}">${block || answerNumber === null ? icon(isSectionBlock ? 'layout-dashboard' : 'file-text', 14) : String(answerNumber + 1).padStart(2, '0')}</span>
       <label class="q-type">
         <span class="q-type__icon">${icon(TYPE_ICON[question.type] || 'type', 16)}</span>
-        <select data-q-type aria-label="ประเภทคำถาม">${typeOptions(question.type)}</select>
+        <select data-q-type aria-label="ประเภท">${typeOptions(question.type)}</select>
         ${icon('chevron-down', 13)}
       </label>
-      <label class="switch switch--compact">
-        <input type="checkbox" data-q-required ${question.required ? 'checked' : ''}>
-        <span class="switch__track"></span>
-        <span class="switch__label">จำเป็น</span>
-      </label>
+      ${block
+        ? `<span class="q-block-label">${isSectionBlock ? 'ขึ้นหน้าใหม่' : 'แสดงอย่างเดียว'}</span>`
+        : `<label class="switch switch--compact">
+            <input type="checkbox" data-q-required ${question.required ? 'checked' : ''}>
+            <span class="switch__track"></span>
+            <span class="switch__label">จำเป็น</span>
+          </label>`}
       <div class="q-card__tools">
         <button class="icon-btn icon-btn--quiet" type="button" data-move="up" aria-label="เลื่อนขึ้น" ${index === 0 ? 'disabled' : ''}>${icon('arrow-up', 15)}</button>
         <button class="icon-btn icon-btn--quiet" type="button" data-move="down" aria-label="เลื่อนลง" ${index === total - 1 ? 'disabled' : ''}>${icon('arrow-down', 15)}</button>
-        <button class="icon-btn icon-btn--quiet" type="button" data-duplicate aria-label="ทำสำเนาคำถาม">${icon('duplicate', 15)}</button>
-        <button class="icon-btn icon-btn--quiet icon-btn--danger" type="button" data-remove-q aria-label="ลบคำถาม">${icon('trash', 15)}</button>
+        <button class="icon-btn icon-btn--quiet" type="button" data-duplicate aria-label="ทำสำเนา">${icon('duplicate', 15)}</button>
+        <button class="icon-btn icon-btn--quiet icon-btn--danger" type="button" data-remove-q aria-label="ลบรายการ">${icon('trash', 15)}</button>
       </div>
     </div>
     <div class="q-card__body">
-      <textarea class="q-title-input" data-q-title rows="1" placeholder="พิมพ์คำถามของคุณ…">${e(question.title)}</textarea>
-      <input class="q-desc-input" type="text" data-q-desc value="${e(question.description)}" placeholder="คำอธิบายเพิ่มเติม (ไม่บังคับ)" aria-label="คำอธิบายเพิ่มเติม">
+      <textarea class="q-title-input" data-q-title rows="1" placeholder="${titlePlaceholder}">${e(question.title)}</textarea>
+      ${descriptionField}
       <div class="q-editor">${typeEditor(question)}</div>
     </div>
   </article>`;
@@ -169,7 +218,8 @@ export async function builderView({ session, formId }) {
           <textarea class="builder-desc" data-description rows="2" placeholder="คำอธิบายแบบสอบถาม — บอกวัตถุประสงค์และเวลาที่ใช้โดยประมาณ" aria-label="คำอธิบายแบบสอบถาม" maxlength="1200">${e(draft.description)}</textarea>
           <div class="builder-head__meta">
             <span class="builder-owner">${avatar(session.name, 24)} ${e(session.name)}</span>
-            <span>${icon('clipboard-list', 14)} <b data-q-count>${formatNumber(draft.questions.length)}</b> ข้อ</span>
+            <span>${icon('clipboard-list', 14)} <b data-q-count>${formatNumber(draft.questions.filter(question => isAnswerable(question.type)).length)}</b> ข้อ</span>
+            <span data-section-meta ${draft.questions.some(question => question.type === 'section') ? '' : 'hidden'}>${icon('layout-dashboard', 14)} <b data-section-count>${formatNumber(draft.questions.filter(question => question.type === 'section').length)}</b> ส่วน</span>
             ${existing ? `<span>${icon('inbox', 14)} ${formatNumber(draft.responseCount)} คำตอบ</span>` : ''}
             <span class="builder-head__status" data-head-status>${statusBadge(statusOf(draft).key)}</span>
           </div>
@@ -177,12 +227,22 @@ export async function builderView({ session, formId }) {
 
         <div class="builder-questions" data-questions></div>
 
-        <button class="add-question" type="button" data-add-question>
-          <span class="add-question__icon">${icon('plus', 20)}</span>
-          <span><strong>เพิ่มคำถาม</strong><small>เลือกประเภทคำถามได้ภายหลัง</small></span>
-        </button>
+        <div class="builder-add-row">
+          <button class="add-question" type="button" data-add-question>
+            <span class="add-question__icon">${icon('plus', 20)}</span>
+            <span><strong>เพิ่มคำถาม</strong><small>ข้อความ ตัวเลือก คะแนน ฯลฯ</small></span>
+          </button>
+          <button class="add-question add-question--section" type="button" data-add-section>
+            <span class="add-question__icon">${icon('layout-dashboard', 20)}</span>
+            <span><strong>เพิ่มส่วน</strong><small>แบ่งหน้าเหมือน Google Form</small></span>
+          </button>
+          <button class="add-question add-question--content" type="button" data-add-content>
+            <span class="add-question__icon">${icon('file-text', 20)}</span>
+            <span><strong>ข้อความ / รูปภาพ</strong><small>แสดงอย่างเดียว ไม่ต้องตอบ</small></span>
+          </button>
+        </div>
 
-        <p class="builder-tip">${icon('info', 14)} ข้อที่มีเครื่องหมาย <b>*</b> คือข้อบังคับ ผู้ตอบจะส่งแบบสอบถามไม่ได้จนกว่าจะตอบครบ</p>
+        <p class="builder-tip">${icon('info', 14)} ข้อที่มีเครื่องหมาย <b>*</b> คือข้อบังคับ · “ส่วน” จะเริ่มหน้าใหม่สำหรับผู้ตอบ · “ข้อความ / รูปภาพ” ใช้แสดงคำอธิบายโดยไม่เก็บคำตอบ</p>
       </div>
 
       <aside class="builder-side">
@@ -267,9 +327,21 @@ export async function builderView({ session, formId }) {
   function renderQuestions() {
     const wrap = document.querySelector('[data-questions]');
     if (!wrap) return;
-    wrap.innerHTML = draft.questions.map((question, index) => questionCard(question, index, draft.questions.length)).join('');
+    let answerNumber = 0;
+    wrap.innerHTML = draft.questions.map((question, index) => {
+      const displayNumber = isAnswerable(question.type) ? answerNumber++ : null;
+      return questionCard(question, index, draft.questions.length, displayNumber);
+    }).join('');
+    const answerCount = draft.questions.filter(question => isAnswerable(question.type)).length;
+    const sectionCount = draft.questions.filter(question => question.type === 'section').length;
     const count = document.querySelector('[data-q-count]');
-    if (count) count.textContent = formatNumber(draft.questions.length);
+    if (count) count.textContent = formatNumber(answerCount);
+    const sectionMeta = document.querySelector('[data-section-meta]');
+    if (sectionMeta) {
+      sectionMeta.hidden = sectionCount === 0;
+      const sectionValue = sectionMeta.querySelector('[data-section-count]');
+      if (sectionValue) sectionValue.textContent = formatNumber(sectionCount);
+    }
     wrap.querySelectorAll('textarea').forEach(autoGrow);
   }
 
@@ -319,11 +391,41 @@ export async function builderView({ session, formId }) {
       document.querySelector('[data-title]')?.focus();
       return false;
     }
+    let answerIndex = 0;
+    let sectionIndex = 0;
     for (let i = 0; i < draft.questions.length; i += 1) {
       const question = draft.questions[i];
-      question.title = question.title.trim();
+      question.title = (question.title || '').trim();
+      question.description = (question.description || '').trim();
+      if (question.type === 'section') {
+        sectionIndex += 1;
+        if (!question.title) {
+          toast(`ส่วนที่ ${sectionIndex} ยังไม่มีชื่อ`, 'warning');
+          const card = document.querySelector(`[data-qid="${question.id}"]`);
+          card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card?.querySelector('[data-q-title]')?.focus();
+          return false;
+        }
+        question.required = false;
+        question.options = [];
+        question.image = null;
+        continue;
+      }
+      if (question.type === 'content') {
+        if (!question.description && !question.image?.url && !question.title) {
+          toast(`ข้อความ/รูปภาพรายการที่ ${i + 1} ยังไม่มีเนื้อหา`, 'warning');
+          const card = document.querySelector(`[data-qid="${question.id}"]`);
+          card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card?.querySelector('[data-q-desc]')?.focus();
+          return false;
+        }
+        question.required = false;
+        question.options = [];
+        continue;
+      }
+      answerIndex += 1;
       if (!question.title) {
-        toast(`ข้อ ${i + 1} ยังไม่มีข้อความคำถาม`, 'warning');
+        toast(`ข้อ ${answerIndex} ยังไม่มีข้อความคำถาม`, 'warning');
         const card = document.querySelector(`[data-qid="${question.id}"]`);
         card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         card?.querySelector('[data-q-title]')?.focus();
@@ -332,7 +434,7 @@ export async function builderView({ session, formId }) {
       if (isChoice(question.type)) {
         question.options = question.options.map(option => option.trim()).filter(Boolean);
         if (question.options.length < 2) {
-          toast(`ข้อ ${i + 1} ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก`, 'warning');
+          toast(`ข้อ ${answerIndex} ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก`, 'warning');
           return false;
         }
       }
@@ -346,15 +448,35 @@ export async function builderView({ session, formId }) {
   }
 
   function cleanQuestions() {
-    return draft.questions.map(question => ({
-      id: question.id,
-      type: question.type,
-      title: question.title.trim(),
-      description: question.description.trim(),
-      required: Boolean(question.required),
-      options: isChoice(question.type) ? question.options.map(option => option.trim()).filter(Boolean) : [],
-      ...(question.type === 'rating' ? { scale: Number(question.scale) || 5 } : {})
-    }));
+    return draft.questions.map(question => {
+      const base = {
+        id: question.id,
+        type: question.type,
+        title: (question.title || '').trim(),
+        description: (question.description || '').trim()
+      };
+      if (question.type === 'section') return { ...base, required: false };
+      if (question.type === 'content') {
+        return {
+          ...base,
+          required: false,
+          ...(question.image?.url ? {
+            image: {
+              url: question.image.url,
+              name: question.image.name || '',
+              width: Number(question.image.width) || 0,
+              height: Number(question.image.height) || 0
+            }
+          } : {})
+        };
+      }
+      return {
+        ...base,
+        required: Boolean(question.required),
+        options: isChoice(question.type) ? question.options.map(option => option.trim()).filter(Boolean) : [],
+        ...(question.type === 'rating' ? { scale: Number(question.scale) || 5 } : {})
+      };
+    });
   }
 
   function refreshLinkCard() {
@@ -440,15 +562,17 @@ export async function builderView({ session, formId }) {
   function openPreview() {
     collectSettings();
     const questions = cleanQuestions();
+    const answerQuestions = questions.filter(question => isAnswerable(question.type));
+    const answerIndex = new Map(answerQuestions.map((question, index) => [question.id, index]));
     const body = `<div class="preview-shell">
       <div class="preview-banner">${icon('eye', 15)} ตัวอย่างหน้าผู้ตอบ — ยังไม่บันทึกการเปลี่ยนแปลง</div>
       <div class="preview-page">
         <div class="preview-page__accent"></div>
         <h2>${e(draft.title || 'ชื่อแบบสอบถาม')}</h2>
         ${draft.description ? `<p>${e(draft.description)}</p>` : ''}
-        <div class="preview-page__meta">${icon('clipboard-list', 13)} ${questions.length} ข้อ ${draft.openAt ? `· เปิด ${thaiDateTime(draft.openAt)}` : ''}</div>
+        <div class="preview-page__meta">${icon('clipboard-list', 13)} ${answerQuestions.length} ข้อ ${draft.openAt ? `· เปิด ${thaiDateTime(draft.openAt)}` : ''}</div>
         <div class="preview-questions">
-          ${questions.map((question, index) => questionInputMarkup(question, index, { preview: true })).join('')}
+          ${questions.map(question => questionInputMarkup(question, answerIndex.get(question.id) ?? 0, { preview: true })).join('')}
         </div>
         <button class="btn btn--primary btn--wide" type="button" disabled>ส่งคำตอบ</button>
         <p class="preview-page__note">${icon('lock', 12)} ผู้ตอบไม่ต้องเข้าสู่ระบบ และระบบไม่เก็บชื่อผู้อตอบ</p>
@@ -526,17 +650,47 @@ export async function builderView({ session, formId }) {
       }
     });
 
-    root.addEventListener('change', event => {
+    root.addEventListener('change', async event => {
       const target = event.target;
+      if (target.matches('[data-image-input]')) {
+        const file = target.files?.[0];
+        const question = findQuestion(target.closest('[data-qid]')?.dataset.qid);
+        if (!file || !question) return;
+        const uploadLabel = target.closest('.content-upload');
+        uploadLabel?.classList.add('is-loading');
+        try {
+          const dataUrl = await imageFileToDataUrl(file);
+          question.image = { url: dataUrl, name: file.name };
+          setDirty();
+          renderQuestions();
+          toast('เพิ่มรูปประกอบแล้ว', 'success');
+        } catch (error) {
+          toast(error?.message || 'อัปโหลดรูปไม่สำเร็จ', 'error');
+        } finally {
+          uploadLabel?.classList.remove('is-loading');
+        }
+        return;
+      }
       if (target.matches('[data-q-type]')) {
         const card = target.closest('[data-qid]');
         const question = findQuestion(card?.dataset.qid);
         if (!question) return;
         question.type = target.value;
-        if (isChoice(question.type)) {
-          if (!question.options.length) question.options = ['ตัวเลือก 1', 'ตัวเลือก 2'];
-        } else if (question.type !== 'yesno') {
+        if (question.type === 'section') {
+          question.required = false;
           question.options = [];
+          question.image = null;
+          if (!question.title.trim()) question.title = 'ส่วนใหม่';
+        } else if (question.type === 'content') {
+          question.required = false;
+          question.options = [];
+        } else {
+          question.image = null;
+          if (isChoice(question.type)) {
+            if (!question.options.length) question.options = ['ตัวเลือก 1', 'ตัวเลือก 2'];
+          } else if (question.type !== 'yesno') {
+            question.options = [];
+          }
         }
         setDirty();
         renderQuestions();
@@ -578,6 +732,25 @@ export async function builderView({ session, formId }) {
         last?.querySelector('[data-q-title]')?.focus();
         return;
       }
+      if (target.closest('[data-add-section]')) {
+        draft.questions.push(newQuestion('section'));
+        setDirty();
+        renderQuestions();
+        const last = document.querySelector('.builder-questions .q-card:last-child');
+        last?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        last?.querySelector('[data-q-title]')?.focus();
+        last?.querySelector('[data-q-title]')?.select();
+        return;
+      }
+      if (target.closest('[data-add-content]')) {
+        draft.questions.push(newQuestion('content'));
+        setDirty();
+        renderQuestions();
+        const last = document.querySelector('.builder-questions .q-card:last-child');
+        last?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        last?.querySelector('[data-q-desc]')?.focus();
+        return;
+      }
       if (target.closest('[data-save]')) {
         await persist();
         return;
@@ -610,6 +783,12 @@ export async function builderView({ session, formId }) {
       }
       if (!question) return;
 
+      if (target.closest('[data-remove-image]')) {
+        question.image = null;
+        setDirty();
+        renderQuestions();
+        return;
+      }
       if (target.closest('[data-add-opt]')) {
         question.options.push(`ตัวเลือก ${question.options.length + 1}`);
         setDirty();

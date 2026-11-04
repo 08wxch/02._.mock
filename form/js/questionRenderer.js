@@ -6,6 +6,30 @@ export function isChoice(type) {
   return type === 'radio' || type === 'checkbox' || type === 'dropdown';
 }
 
+export function isAnswerable(type) {
+  return type !== 'section' && type !== 'content';
+}
+
+export function isSection(type) {
+  return type === 'section';
+}
+
+export function isContent(type) {
+  return type === 'content';
+}
+
+function normalizeImage(image) {
+  if (!image || typeof image !== 'object') return null;
+  const url = String(image.url || '');
+  if (!/^(data:image\/|https?:\/\/)/i.test(url)) return null;
+  return {
+    url,
+    name: String(image.name || ''),
+    width: Number(image.width) || 0,
+    height: Number(image.height) || 0
+  };
+}
+
 export function normalizeQuestion(question = {}) {
   const type = question.type || 'short';
   const options = Array.isArray(question.options) ? question.options : [];
@@ -16,11 +40,18 @@ export function normalizeQuestion(question = {}) {
     description: question.description || '',
     required: Boolean(question.required),
     options: isChoice(type) || type === 'yesno' ? options : [],
-    scale: Number(question.scale) || 5
+    scale: Number(question.scale) || 5,
+    image: type === 'content' ? normalizeImage(question.image) : null
   };
 }
 
 export function newQuestion(type = 'radio') {
+  if (type === 'section') {
+    return normalizeQuestion({ type, title: 'ส่วนใหม่', description: '', required: false });
+  }
+  if (type === 'content') {
+    return normalizeQuestion({ type, title: '', description: '', required: false, image: null });
+  }
   return normalizeQuestion({
     type,
     title: '',
@@ -31,12 +62,37 @@ export function newQuestion(type = 'radio') {
   });
 }
 
+function imageMarkup(image, title = '') {
+  if (!image?.url) return '';
+  return `<figure class="content-image">
+    <img src="${e(image.url)}" alt="${e(image.name || title || 'รูปประกอบ')}" loading="lazy">
+  </figure>`;
+}
+
+function sectionMarkup(question) {
+  return `<section class="form-section" data-section-id="${e(question.id)}">
+    <span class="form-section__eyebrow">${icon('layout-dashboard', 13)} ส่วน</span>
+    <h2>${e(question.title || 'ส่วนใหม่')}</h2>
+    ${question.description ? `<p>${e(question.description)}</p>` : ''}
+  </section>`;
+}
+
+function contentMarkup(question) {
+  return `<section class="content-block" data-qid="${e(question.id)}">
+    ${question.title ? `<h3 class="content-block__title">${e(question.title)}</h3>` : ''}
+    ${question.description ? `<div class="content-block__text">${e(question.description)}</div>` : ''}
+    ${imageMarkup(question.image, question.title)}
+  </section>`;
+}
+
 function inputName(question) {
   return `q_${question.id}`;
 }
 
 export function questionInputMarkup(question, index, { preview = false, value = undefined, error = '' } = {}) {
   const q = normalizeQuestion(question);
+  if (q.type === 'section') return sectionMarkup(q);
+  if (q.type === 'content') return contentMarkup(q);
   const disabled = preview ? 'disabled' : '';
   const name = inputName(q);
   let body = '';
@@ -120,6 +176,7 @@ export function questionInputMarkup(question, index, { preview = false, value = 
 
 export function readAnswer(form, question) {
   const q = normalizeQuestion(question);
+  if (!isAnswerable(q.type)) return '';
   const name = inputName(q);
   if (q.type === 'checkbox') {
     return [...form.querySelectorAll(`input[name="${name}"]:checked`)].map(input => input.value);
@@ -138,6 +195,7 @@ export function readAnswer(form, question) {
 
 export function validateAnswer(question, value) {
   const q = normalizeQuestion(question);
+  if (!isAnswerable(q.type)) return '';
   const empty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
   if (q.required && empty) return 'ข้อนี้จำเป็นต้องตอบ';
   if (empty) return '';
@@ -148,7 +206,27 @@ export function validateAnswer(question, value) {
 
 export function answeredCount(form, questions) {
   return questions.filter(question => {
+    if (!isAnswerable(question.type)) return false;
     const value = readAnswer(form, question);
     return !(value === '' || value === null || (Array.isArray(value) && value.length === 0));
   }).length;
+}
+
+export function buildPages(questions = []) {
+  const pages = [];
+  let current = null;
+  const startPage = (section = null) => {
+    current = { section, items: [] };
+    pages.push(current);
+  };
+  questions.map(normalizeQuestion).forEach(question => {
+    if (question.type === 'section') {
+      startPage(question);
+      return;
+    }
+    if (!current) startPage();
+    current.items.push(question);
+  });
+  if (!pages.length) startPage();
+  return pages;
 }
