@@ -466,7 +466,7 @@ export function teacherExamsView(ctx) {
 function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdit = false, canViewStats = false, canReview = false, canRemind = false } = {}) {
   const meta = statusMeta(exam.status);
   const creator = creatorOfExam(exam);
-  const shareLabel = exam.shareMode === 'edit' ? 'ครูท่านอื่นแก้ไขได้' : 'ครูท่านอื่นแก้ไขไม่ได้';
+  const shareLabel = exam.shareMode === 'edit' ? 'ครูท่านอื่นสามารถแก้ไขได้' : 'ครูท่านอื่นไม่สามารถแก้ไขได้';
   return `<a class="page-back" href="#/teacher/exams">${icon('arrow-left', 15)} กลับชุดสอบทั้งหมด</a>
   <div class="exam-admin-head">
     <div class="exam-admin-head__main">
@@ -3200,7 +3200,7 @@ export function teacherStudentExamView(ctx) {
     return {
       html: teacherShell(session, {
         active: 'students', crumb: 'ไม่พบข้อมูล',
-        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'ยังเปิดรายละเอียดไม่ได้', text: 'นักเรียนหรือชุดสอบอยู่นอกขอบเขตที่คุณดูได้ · ชุดสอบแบบครูท่านอื่นแก้ไขไม่ได้จะเปิดรายละเอียดเมื่อปิดสอบแล้ว', action: `<a class="btn btn--primary" href="${student ? `#/teacher/student/${student.id}` : '#/teacher/students'}">กลับนามบัตร</a>` })}</div>`
+        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'ยังเปิดรายละเอียดไม่ได้', text: 'นักเรียนหรือชุดสอบอยู่นอกขอบเขตที่คุณดูได้ · ชุดสอบแบบครูท่านอื่นไม่สามารถแก้ไขได้จะเปิดรายละเอียดเมื่อปิดสอบแล้ว', action: `<a class="btn btn--primary" href="${student ? `#/teacher/student/${student.id}` : '#/teacher/students'}">กลับนามบัตร</a>` })}</div>`
       }),
       mount: () => mountTeacherShell(session)
     };

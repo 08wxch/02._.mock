@@ -709,7 +709,7 @@ export function createExamView(ctx) {
       html: teacherShell(session, {
         active: 'exams',
         crumb: 'อ่านอย่างเดียว',
-        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'แก้ไขชุดสอบนี้ไม่ได้', text: 'ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นแก้ไขไม่ได้ เฉพาะเจ้าของชุดสอบและ Wich Pitchon ที่แก้ไขได้', action: `<a class="btn btn--primary" href="#/teacher/exam/${sourceExam.id}/overview">ดูข้อมูลชุดสอบ</a>` })}</div>`
+        content: `<div class="teacher-card">${emptyState({ iconName: 'lock', title: 'แก้ไขชุดสอบนี้ไม่ได้', text: 'ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นไม่สามารถแก้ไขได้ เฉพาะเจ้าของชุดสอบและ Wich Pitchon ที่แก้ไขได้', action: `<a class="btn btn--primary" href="#/teacher/exam/${sourceExam.id}/overview">ดูข้อมูลชุดสอบ</a>` })}</div>`
       }),
       mount: () => mountTeacherShell(session)
     };
@@ -804,10 +804,10 @@ export function createExamView(ctx) {
             <p class="field__hint" style="margin-top:-4px">${icon('info', 12)} นักเรียนจะเข้าสอบได้เฉพาะช่วงเวลานี้ · ระบบใช้เวลาท้องถิ่นของเครื่อง</p>
             <div class="field"><label for="exam-share-mode">สิทธิ์ของครูท่านอื่น</label>
               <select class="select" id="exam-share-mode" data-field="shareMode">
-                <option value="view" ${draft.shareMode !== 'edit' ? 'selected' : ''}>ครูท่านอื่นแก้ไขไม่ได้</option>
-                <option value="edit" ${draft.shareMode === 'edit' ? 'selected' : ''}>ครูท่านอื่นแก้ไขได้</option>
+                <option value="view" ${draft.shareMode !== 'edit' ? 'selected' : ''}>ครูท่านอื่นไม่สามารถแก้ไขได้</option>
+                <option value="edit" ${draft.shareMode === 'edit' ? 'selected' : ''}>ครูท่านอื่นสามารถแก้ไขได้</option>
               </select>
-              <p class="field__hint">${icon('eye', 12)} ถ้าเลือก “แก้ไขไม่ได้” ครูท่านอื่นจะเห็นสถิติหลังปิดสอบ และหน้าสถิติจะไม่แสดงโจทย์ ตัวเลือก หรือเฉลย · Wich เห็นทุกอย่างเสมอ</p>
+              <p class="field__hint">${icon('eye', 12)} ถ้าเลือก “ไม่สามารถแก้ไขได้” ครูท่านอื่นจะเห็นสถิติหลังปิดสอบ และหน้าสถิติจะไม่แสดงโจทย์ ตัวเลือก หรือเฉลย · Wich เห็นทุกอย่างเสมอ</p>
             </div>
           </div>
         </section>
