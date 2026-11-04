@@ -33,15 +33,19 @@ function cardMarkup(form, session, peopleById) {
   const editable = ownsForm(form, session) || session.isAdmin;
   const questions = form.questions?.length || 0;
   const responses = Number(form.responseCount || 0);
-  const detailHref = results ? `#/forms/${form.id}/results` : publicLink(form.slug);
-  const detailAttrs = results ? '' : ' target="_blank" rel="noopener"';
+  const shareable = form.status !== 'draft';
+  const detailHref = !shareable && editable
+    ? `#/forms/${form.id}/edit`
+    : results ? `#/forms/${form.id}/results` : publicLink(form.slug);
+  const detailAttrs = results || (!shareable && editable) ? '' : ' target="_blank" rel="noopener"';
+  const ctaLabel = !shareable && editable ? 'แก้ไข' : results ? 'ดูผล' : 'เปิดดู';
   const menu = `
     <div class="card-menu" data-menu hidden>
       ${results ? `<a class="card-menu__item" href="#/forms/${form.id}/results">${icon('bar-chart', 15)} ดูผลคำตอบ</a>` : ''}
       ${editable ? `<a class="card-menu__item" href="#/forms/${form.id}/edit">${icon('edit', 15)} แก้ไขแบบสอบถาม</a>` : ''}
       ${form.status !== 'draft' ? `<a class="card-menu__item" href="${shareUrl(form)}" target="_blank" rel="noopener">${icon('external-link', 15)} เปิดลิงก์ผู้ตอบ</a>` : ''}
-      <button class="card-menu__item" type="button" data-copy-text="${e(shareUrl(form))}">${icon('copy', 15)} คัดลอกลิงก์</button>
-      <button class="card-menu__item" type="button" data-qr="${form.id}">${icon('qr', 15)} QR Code</button>
+      ${shareable ? `<button class="card-menu__item" type="button" data-copy-text="${e(shareUrl(form))}">${icon('copy', 15)} คัดลอกลิงก์</button>
+      <button class="card-menu__item" type="button" data-qr="${form.id}">${icon('qr', 15)} QR Code</button>` : ''}
       ${editable ? `<span class="card-menu__sep"></span><button class="card-menu__item card-menu__item--danger" type="button" data-delete="${form.id}">${icon('trash', 15)} ลบแบบสอบถาม</button>` : ''}
     </div>`;
 
@@ -69,9 +73,11 @@ function cardMarkup(form, session, peopleById) {
       <span class="form-card__when" title="${e(windowLabel(form))}">${icon('calendar-clock', 14)} ${e(windowLabel(form))}</span>
     </div>
     <div class="form-card__foot">
-      <button class="form-card__action" type="button" data-copy-text="${e(shareUrl(form))}">${icon('link', 15)} คัดลอกลิงก์</button>
-      <button class="form-card__action" type="button" data-qr="${form.id}">${icon('qr', 15)} QR</button>
-      <a class="form-card__cta" href="${detailHref}"${detailAttrs}>${results ? 'ดูผล' : 'เปิดดู'} ${icon('arrow-up-right', 14)}</a>
+      ${shareable
+        ? `<button class="form-card__action" type="button" data-copy-text="${e(shareUrl(form))}">${icon('link', 15)} คัดลอกลิงก์</button>
+           <button class="form-card__action" type="button" data-qr="${form.id}">${icon('qr', 15)} QR</button>`
+        : `<button class="form-card__action" type="button" disabled>${icon('lock', 15)} ยังไม่เผยแพร่</button>`}
+      <a class="form-card__cta" href="${detailHref}"${detailAttrs}>${ctaLabel} ${icon('arrow-up-right', 14)}</a>
     </div>
   </article>`;
 }
