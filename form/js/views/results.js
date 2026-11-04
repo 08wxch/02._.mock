@@ -57,10 +57,11 @@ function summaryCard(question, responses) {
     }
     const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     const max = Math.max(1, ...rows.map(row => row[1]));
+    const optionIndex = new Map((question.options || []).map((option, index) => [String(option), index]));
     body = `<div class="bar-list">
       ${rows.map(([label, count], index) => `<div class="bar-row ${count === max && count > 0 ? 'is-top' : ''}">
         <div class="bar-row__head">
-          <span class="bar-row__label">${question.type === 'checkbox' ? `<i class="bar-row__box"></i>` : `<i class="bar-row__dot">${String.fromCharCode(65 + (index % 26))}</i>`}${e(label)}</span>
+          <span class="bar-row__label">${question.type === 'checkbox' ? `<i class="bar-row__box"></i>` : `<i class="bar-row__dot">${String.fromCharCode(65 + ((optionIndex.get(String(label)) ?? index) % 26))}</i>`}${e(label)}</span>
           <span class="bar-row__value"><b>${formatNumber(count)}</b>${base ? `<small>${percent(count, base)}%</small>` : ''}</span>
         </div>
         <div class="bar-row__track"><span style="width:${count ? Math.max(3, (count / max) * 100) : 0}%"></span></div>
