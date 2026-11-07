@@ -241,6 +241,10 @@ export async function publicView({ slug }) {
     };
 
     formEl.addEventListener('input', event => {
+      if (event.target.matches('[data-other-input]')) {
+        const choice = formEl.querySelector(`[data-other-choice="${event.target.dataset.otherInput}"]`);
+        if (choice) choice.checked = true;
+      }
       const section = event.target.closest('.question');
       if (section) section.classList.remove('has-error');
       updateProgress();

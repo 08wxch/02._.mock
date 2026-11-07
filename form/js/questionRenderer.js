@@ -10,6 +10,25 @@ export function isAnswerable(type) {
   return type !== 'section' && type !== 'content';
 }
 
+export function supportsOther(type) {
+  return type === 'radio' || type === 'checkbox';
+}
+
+export const OTHER_PREFIX = '__other__:';
+
+export function isOtherAnswer(value) {
+  return typeof value === 'string' && value.startsWith(OTHER_PREFIX);
+}
+
+export function otherAnswerText(value) {
+  return isOtherAnswer(value) ? value.slice(OTHER_PREFIX.length).trim() : '';
+}
+
+export function displayChoiceValue(value, otherLabel = 'อื่น ๆ') {
+  if (isOtherAnswer(value)) return otherAnswerText(value) || otherLabel;
+  return String(value ?? '');
+}
+
 export function isSection(type) {
   return type === 'section';
 }
@@ -41,6 +60,8 @@ export function normalizeQuestion(question = {}) {
     required: Boolean(question.required),
     options: isChoice(type) || type === 'yesno' ? options : [],
     scale: Number(question.scale) || 5,
+    other: supportsOther(type) ? Boolean(question.other) : false,
+    otherLabel: String(question.otherLabel || 'อื่น ๆ').trim() || 'อื่น ๆ',
     image: type === 'content' ? normalizeImage(question.image) : null
   };
 }
@@ -58,7 +79,9 @@ export function newQuestion(type = 'radio') {
     description: '',
     required: false,
     options: isChoice(type) ? ['ตัวเลือก 1', 'ตัวเลือก 2'] : [],
-    scale: 5
+    scale: 5,
+    other: false,
+    otherLabel: 'อื่น ๆ'
   });
 }
 
@@ -99,16 +122,30 @@ export function questionInputMarkup(question, index, { preview = false, value = 
 
   if (q.type === 'radio' || q.type === 'checkbox') {
     const inputType = q.type === 'checkbox' ? 'checkbox' : 'radio';
-    const selected = q.type === 'checkbox'
+    const rawSelected = q.type === 'checkbox'
       ? (Array.isArray(value) ? value.map(String) : [])
       : (value === undefined || value === null ? [] : [String(value)]);
+    const otherStored = rawSelected.find(item => isOtherAnswer(item));
+    const otherChecked = supportsOther(q.type) && q.other && (rawSelected.includes('__other__') || Boolean(otherStored));
+    const otherValue = otherAnswerText(otherStored) || '';
+    const selected = rawSelected.filter(item => !isOtherAnswer(item) && item !== '__other__');
+    const options = q.options.length ? q.options : ['ตัวเลือก 1', 'ตัวเลือก 2'];
     body = `<div class="answer-options answer-options--${q.type}">
-      ${(q.options.length ? q.options : ['ตัวเลือก 1', 'ตัวเลือก 2']).map((option, optionIndex) => `<label class="answer-option ${selected.includes(String(option)) ? 'is-selected' : ''}">
+      ${options.map((option, optionIndex) => `<label class="answer-option ${selected.includes(String(option)) ? 'is-selected' : ''}">
         <input type="${inputType}" name="${name}" value="${e(option)}" ${selected.includes(String(option)) ? 'checked' : ''} ${disabled}>
         <span class="answer-option__mark">${q.type === 'checkbox' ? icon('check', 12) : ''}</span>
         <span class="answer-option__letter">${String.fromCharCode(65 + optionIndex)}</span>
         <span class="answer-option__text">${e(option)}</span>
       </label>`).join('')}
+      ${q.other ? `<div class="answer-option answer-option--other ${otherChecked ? 'is-selected' : ''}">
+        <label class="answer-option__choice">
+          <input type="${inputType}" name="${name}" value="__other__" data-other-choice="${e(q.id)}" ${otherChecked ? 'checked' : ''} ${disabled}>
+          <span class="answer-option__mark">${q.type === 'checkbox' ? icon('check', 12) : ''}</span>
+          <span class="answer-option__letter">${String.fromCharCode(65 + options.length)}</span>
+          <span class="answer-option__text answer-other__label">${e(q.otherLabel || 'อื่น ๆ')}</span>
+        </label>
+        <input class="answer-other__input" type="text" data-other-input="${e(q.id)}" value="${e(otherValue)}" placeholder="พิมพ์คำตอบของคุณ…" ${disabled}>
+      </div>` : ''}
     </div>`;
   } else if (q.type === 'dropdown') {
     body = `<div class="answer-select">
@@ -179,13 +216,25 @@ export function readAnswer(form, question) {
   if (!isAnswerable(q.type)) return '';
   const name = inputName(q);
   if (q.type === 'checkbox') {
-    return [...form.querySelectorAll(`input[name="${name}"]:checked`)].map(input => input.value);
+    const values = [...form.querySelectorAll(`input[name="${name}"]:checked`)]
+      .map(input => input.value)
+      .filter(item => item !== '__other__');
+    const otherChoice = form.querySelector(`input[name="${name}"][data-other-choice]:checked`);
+    if (otherChoice) {
+      const text = String(form.querySelector(`[data-other-input="${q.id}"]`)?.value || '').trim();
+      values.push(`${OTHER_PREFIX}${text}`);
+    }
+    return values;
   }
   if (q.type === 'radio' || q.type === 'yesno' || q.type === 'rating') {
     const checked = form.querySelector(`input[name="${name}"]:checked`);
     if (!checked) return q.type === 'rating' ? null : '';
     if (q.type === 'yesno') return checked.value === 'true';
     if (q.type === 'rating') return Number(checked.value);
+    if (q.type === 'radio' && checked.value === '__other__') {
+      const text = String(form.querySelector(`[data-other-input="${q.id}"]`)?.value || '').trim();
+      return `${OTHER_PREFIX}${text}`;
+    }
     return checked.value;
   }
   const field = form.querySelector(`[name="${name}"]`);
@@ -197,6 +246,8 @@ export function validateAnswer(question, value) {
   const q = normalizeQuestion(question);
   if (!isAnswerable(q.type)) return '';
   const empty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+  const otherValue = (Array.isArray(value) ? value : [value]).find(item => isOtherAnswer(item));
+  if (otherValue !== undefined && !otherAnswerText(otherValue)) return 'กรุณาระบุคำตอบอื่น ๆ';
   if (q.required && empty) return 'ข้อนี้จำเป็นต้องตอบ';
   if (empty) return '';
   if (q.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))) return 'รูปแบบอีเมลไม่ถูกต้อง';

@@ -10,7 +10,8 @@ import {
   imageFileToDataUrl
 } from '../utils.js';
 import {
-  questionInputMarkup, normalizeQuestion, isChoice, isAnswerable, newQuestion
+  questionInputMarkup, normalizeQuestion, isChoice, isAnswerable, newQuestion,
+  supportsOther, readAnswer, validateAnswer, buildPages
 } from '../questionRenderer.js';
 import { navigate } from '../app.js';
 
@@ -22,13 +23,23 @@ function typeOptions(selected) {
 
 function optionRows(question) {
   const options = question.options.length ? question.options : ['', ''];
+  const canAddOther = supportsOther(question.type);
   return `<div class="opt-list" data-opt-list>
     ${options.map((option, index) => `<div class="opt-row">
       <span class="opt-row__mark">${question.type === 'checkbox' ? icon('check', 11) : String.fromCharCode(65 + index)}</span>
       <input class="opt-row__input" type="text" value="${e(option)}" data-opt="${index}" placeholder="ตัวเลือกที่ ${index + 1}" aria-label="ตัวเลือกที่ ${index + 1}">
       <button class="icon-btn icon-btn--quiet opt-row__remove" type="button" data-opt-remove="${index}" aria-label="ลบตัวเลือก" ${options.length <= 2 ? 'disabled' : ''}>${icon('x', 15)}</button>
     </div>`).join('')}
-    <button class="opt-add" type="button" data-add-opt>${icon('plus', 15)} เพิ่มตัวเลือก</button>
+    ${canAddOther && question.other ? `<div class="opt-row opt-row--other" data-other-row>
+      <span class="opt-row__mark">${question.type === 'checkbox' ? icon('check', 11) : String.fromCharCode(65 + options.length)}</span>
+      <input class="opt-row__input" type="text" value="${e(question.otherLabel || 'อื่น ๆ')}" data-other-label placeholder="อื่น ๆ" aria-label="ข้อความตัวเลือกอื่น ๆ">
+      <span class="opt-row__tag">${icon('edit', 11)} ผู้ตอบพิมพ์เอง</span>
+      <button class="icon-btn icon-btn--quiet opt-row__remove" type="button" data-other-remove aria-label="ลบตัวเลือกอื่น ๆ">${icon('x', 15)}</button>
+    </div>` : ''}
+    <div class="opt-add-row">
+      <button class="opt-add" type="button" data-add-opt>${icon('plus', 15)} เพิ่มตัวเลือก</button>
+      ${canAddOther && !question.other ? `<button class="opt-add opt-add--other" type="button" data-add-other>${icon('plus', 15)} เพิ่ม “อื่น ๆ”</button>` : ''}
+    </div>
   </div>`;
 }
 
@@ -437,6 +448,9 @@ export async function builderView({ session, formId }) {
           toast(`ข้อ ${answerIndex} ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก`, 'warning');
           return false;
         }
+        if (supportsOther(question.type) && question.other) {
+          question.otherLabel = (question.otherLabel || '').trim() || 'อื่น ๆ';
+        }
       }
     }
     if (draft.openAt && draft.closeAt && new Date(draft.closeAt).getTime() <= new Date(draft.openAt).getTime()) {
@@ -474,6 +488,10 @@ export async function builderView({ session, formId }) {
         ...base,
         required: Boolean(question.required),
         options: isChoice(question.type) ? question.options.map(option => option.trim()).filter(Boolean) : [],
+        ...(supportsOther(question.type) ? {
+          other: Boolean(question.other),
+          otherLabel: (question.otherLabel || 'อื่น ๆ').trim() || 'อื่น ๆ'
+        } : {}),
         ...(question.type === 'rating' ? { scale: Number(question.scale) || 5 } : {})
       };
     });
@@ -563,19 +581,37 @@ export async function builderView({ session, formId }) {
     collectSettings();
     const questions = cleanQuestions();
     const answerQuestions = questions.filter(question => isAnswerable(question.type));
+    const pages = buildPages(questions);
     const answerIndex = new Map(answerQuestions.map((question, index) => [question.id, index]));
+    const sectionPages = pages.filter(page => page.section);
+    const pageMarkup = pages.map((page, pageIndex) => {
+      const sectionNumber = page.section ? sectionPages.indexOf(page) + 1 : 0;
+      return `<section class="preview-step" data-preview-page="${pageIndex}" ${pageIndex ? 'hidden' : ''}>
+        ${page.section ? `<div class="preview-section-head">
+          <span class="preview-section-head__eyebrow">${icon('layout-dashboard', 12)} ส่วนที่ ${sectionNumber} จาก ${sectionPages.length}</span>
+          <h3>${e(page.section.title || `ส่วนที่ ${sectionNumber}`)}</h3>
+          ${page.section.description ? `<p>${e(page.section.description)}</p>` : ''}
+        </div>` : ''}
+        <div class="preview-questions">
+          ${page.items.map(item => questionInputMarkup(item, answerIndex.get(item.id) ?? 0, {})).join('')}
+        </div>
+      </section>`;
+    }).join('');
     const body = `<div class="preview-shell">
-      <div class="preview-banner">${icon('eye', 15)} ตัวอย่างหน้าผู้ตอบ — ยังไม่บันทึกการเปลี่ยนแปลง</div>
+      <div class="preview-banner">${icon('eye', 15)} ตัวอย่างหน้าผู้ตอบ — ลองกดเลือกและเลื่อนหน้าได้จริง แต่ไม่บันทึกคำตอบ</div>
       <div class="preview-page">
         <div class="preview-page__accent"></div>
         <h2>${e(draft.title || 'ชื่อแบบสอบถาม')}</h2>
         ${draft.description ? `<p>${e(draft.description)}</p>` : ''}
-        <div class="preview-page__meta">${icon('clipboard-list', 13)} ${answerQuestions.length} ข้อ ${draft.openAt ? `· เปิด ${thaiDateTime(draft.openAt)}` : ''}</div>
-        <div class="preview-questions">
-          ${questions.map(question => questionInputMarkup(question, answerIndex.get(question.id) ?? 0, { preview: true })).join('')}
+        <div class="preview-page__meta">${icon('clipboard-list', 13)} ${answerQuestions.length} ข้อ${sectionPages.length ? ` · ${sectionPages.length} ส่วน` : ''} ${draft.openAt ? `· เปิด ${thaiDateTime(draft.openAt)}` : ''}</div>
+        <div class="preview-pages" data-preview-pages>${pageMarkup}</div>
+        <div class="preview-step-nav" data-preview-nav ${pages.length > 1 ? '' : 'hidden'}>
+          <button class="btn btn--ghost btn--sm" type="button" data-preview-prev>${icon('arrow-left', 14)} ย้อนกลับ</button>
+          <span class="preview-step-nav__label" data-preview-label></span>
+          <button class="btn btn--primary btn--sm" type="button" data-preview-next>ถัดไป ${icon('arrow-right', 14)}</button>
         </div>
-        <button class="btn btn--primary btn--wide" type="button" disabled>ส่งคำตอบ</button>
-        <p class="preview-page__note">${icon('lock', 12)} ผู้ตอบไม่ต้องเข้าสู่ระบบ และระบบไม่เก็บชื่อผู้อตอบ</p>
+        <button class="btn btn--primary btn--wide" type="button" data-preview-submit ${pages.length > 1 ? 'hidden' : ''}>${icon('send', 15)} ทดลองส่งคำตอบ</button>
+        <p class="preview-page__note">${icon('lock', 12)} โหมดตัวอย่าง — คำตอบจะไม่ถูกบันทึก และไม่ถูกส่งเข้าฐานข้อมูล</p>
       </div>
     </div>`;
     openModal({
@@ -583,8 +619,100 @@ export async function builderView({ session, formId }) {
       eyebrow: 'พรีวิว',
       size: 'lg',
       body,
-      footer: `<button class="btn btn--ghost" type="button" data-modal-dismiss>ปิดตัวอย่าง</button>`
+      footer: `<button class="btn btn--ghost" type="button" data-modal-dismiss>ปิดตัวอย่าง</button>`,
+      onMount: root => mountPreview(root)
     });
+  }
+
+  function mountPreview(root) {
+    const pagesEls = [...root.querySelectorAll('[data-preview-page]')];
+    const prev = root.querySelector('[data-preview-prev]');
+    const next = root.querySelector('[data-preview-next]');
+    const submit = root.querySelector('[data-preview-submit]');
+    const nav = root.querySelector('[data-preview-nav]');
+    const label = root.querySelector('[data-preview-label]');
+    const answerQuestions = cleanQuestions().filter(question => isAnswerable(question.type));
+    let current = 0;
+
+    const showPage = index => {
+      current = Math.max(0, Math.min(index, pagesEls.length - 1));
+      pagesEls.forEach((page, pageIndex) => { page.hidden = pageIndex !== current; });
+      if (prev) prev.hidden = current === 0;
+      if (next) next.hidden = current === pagesEls.length - 1;
+      if (submit) submit.hidden = current !== pagesEls.length - 1;
+      if (nav) nav.hidden = pagesEls.length <= 1;
+      if (label) label.textContent = pagesEls.length > 1 ? `หน้า ${current + 1} จาก ${pagesEls.length}` : '';
+    };
+
+    const showErrors = errors => {
+      root.querySelectorAll('.question').forEach(section => section.classList.remove('has-error'));
+      Object.entries(errors).forEach(([qid, message]) => {
+        const section = root.querySelector(`[data-qid="${qid}"]`);
+        if (!section) return;
+        section.classList.add('has-error');
+        const slot = section.querySelector('.question__error span');
+        if (slot) slot.textContent = message;
+      });
+      const first = root.querySelector('.question.has-error');
+      if (!first) return;
+      const page = first.closest('[data-preview-page]');
+      const index = pagesEls.indexOf(page);
+      if (index >= 0) showPage(index);
+      first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
+    const validateList = list => {
+      const errors = {};
+      list.forEach(question => {
+        const value = readAnswer(root, question);
+        const error = validateAnswer(question, value);
+        if (error) errors[question.id] = error;
+      });
+      return errors;
+    };
+
+    root.addEventListener('input', event => {
+      if (event.target.matches('[data-other-input]')) {
+        const choice = root.querySelector(`[data-other-choice="${event.target.dataset.otherInput}"]`);
+        if (choice) choice.checked = true;
+      }
+      const section = event.target.closest('.question');
+      if (section) section.classList.remove('has-error');
+    });
+
+    prev?.addEventListener('click', () => showPage(current - 1));
+    next?.addEventListener('click', () => {
+      const pageQuestions = [...pagesEls[current].querySelectorAll('.question')]
+        .map(section => answerQuestions.find(question => question.id === section.dataset.qid))
+        .filter(Boolean);
+      const errors = validateList(pageQuestions);
+      if (Object.keys(errors).length) {
+        showErrors(errors);
+        toast('กรุณาตอบข้อที่จำเป็นในส่วนนี้ให้ครบก่อนไปต่อ', 'warning');
+        return;
+      }
+      showPage(current + 1);
+    });
+
+    submit?.addEventListener('click', () => {
+      const errors = validateList(answerQuestions);
+      if (Object.keys(errors).length) {
+        showErrors(errors);
+        toast('กรุณาตอบข้อที่จำเป็นให้ครบก่อนส่ง', 'warning');
+        return;
+      }
+      const page = root.querySelector('.preview-page');
+      if (page) {
+        page.innerHTML = `<div class="preview-success">
+          <span class="preview-success__icon">${icon('check', 26)}</span>
+          <span class="eyebrow">โหมดตัวอย่าง</span>
+          <h3>ส่งคำตอบเรียบร้อย (จำลอง)</h3>
+          <p>นี่คือตัวอย่างหน้าจอหลังผู้ตอบส่งแบบสอบถาม — คำตอบจริงจะไม่ถูกบันทึกจากการดูตัวอย่าง</p>
+        </div>`;
+      }
+    });
+
+    showPage(0);
   }
 
   async function handleDelete() {
@@ -644,6 +772,10 @@ export async function builderView({ session, formId }) {
         const question = findQuestion(target.closest('[data-qid]')?.dataset.qid);
         if (question) question.options[Number(target.dataset.opt)] = target.value;
         setDirty();
+      } else if (target.matches('[data-other-label]')) {
+        const question = findQuestion(target.closest('[data-qid]')?.dataset.qid);
+        if (question) question.otherLabel = target.value;
+        setDirty();
       } else if (target.matches('[data-confirmation]')) {
         draft.settings.confirmation = target.value;
         setDirty();
@@ -686,6 +818,10 @@ export async function builderView({ session, formId }) {
           question.options = [];
         } else {
           question.image = null;
+          if (!supportsOther(question.type)) {
+            question.other = false;
+            question.otherLabel = 'อื่น ๆ';
+          }
           if (isChoice(question.type)) {
             if (!question.options.length) question.options = ['ตัวเลือก 1', 'ตัวเลือก 2'];
           } else if (question.type !== 'yesno') {
@@ -785,6 +921,23 @@ export async function builderView({ session, formId }) {
 
       if (target.closest('[data-remove-image]')) {
         question.image = null;
+        setDirty();
+        renderQuestions();
+        return;
+      }
+      if (target.closest('[data-add-other]')) {
+        question.other = true;
+        question.otherLabel = 'อื่น ๆ';
+        setDirty();
+        renderQuestions();
+        const otherInput = document.querySelector(`[data-qid="${question.id}"] [data-other-label]`);
+        otherInput?.focus();
+        otherInput?.select();
+        return;
+      }
+      if (target.closest('[data-other-remove]')) {
+        question.other = false;
+        question.otherLabel = 'อื่น ๆ';
         setDirty();
         renderQuestions();
         return;

@@ -8,7 +8,9 @@ import {
   e, thaiDateTime, relativeTime, formatNumber, percent, toCsv, downloadBlob,
   safeFilename, statusOf, windowLabel
 } from '../utils.js';
-import { normalizeQuestion, isAnswerable } from '../questionRenderer.js';
+import {
+  normalizeQuestion, isAnswerable, isOtherAnswer, otherAnswerText, displayChoiceValue
+} from '../questionRenderer.js';
 import { TYPE_LABEL } from '../config.js';
 
 function isAnswered(value) {
@@ -18,7 +20,9 @@ function isAnswered(value) {
 function answerText(question, value) {
   if (!isAnswered(value)) return '';
   if (question.type === 'yesno') return value === true || value === 'true' ? 'ใช่' : 'ไม่ใช่';
-  if (Array.isArray(value)) return value.join(' · ');
+  const label = question.otherLabel || 'อื่น ๆ';
+  if (Array.isArray(value)) return value.map(item => displayChoiceValue(item, label)).filter(Boolean).join(' · ');
+  if (isOtherAnswer(value)) return otherAnswerText(value) || label;
   return String(value);
 }
 
@@ -47,21 +51,30 @@ function summaryCard(question, responses) {
     } else {
       const options = question.options?.length ? question.options : [];
       options.forEach(option => counts.set(String(option), 0));
+      const otherLabel = question.otherLabel || 'อื่น ๆ';
+      const otherKeys = new Set();
+      const bump = item => {
+        const label = displayChoiceValue(item, otherLabel);
+        if (!label) return;
+        if (isOtherAnswer(item)) otherKeys.add(label);
+        counts.set(label, (counts.get(label) || 0) + 1);
+      };
       answered.forEach(value => {
-        if (question.type === 'checkbox' && Array.isArray(value)) {
-          value.forEach(item => counts.set(String(item), (counts.get(String(item)) || 0) + 1));
-        } else {
-          counts.set(String(value), (counts.get(String(value)) || 0) + 1);
-        }
+        if (question.type === 'checkbox' && Array.isArray(value)) value.forEach(bump);
+        else bump(value);
       });
+      question._otherKeys = otherKeys;
     }
     const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     const max = Math.max(1, ...rows.map(row => row[1]));
     const optionIndex = new Map((question.options || []).map((option, index) => [String(option), index]));
+    const otherKeys = question._otherKeys || new Set();
     body = `<div class="bar-list">
       ${rows.map(([label, count], index) => `<div class="bar-row ${count === max && count > 0 ? 'is-top' : ''}">
         <div class="bar-row__head">
-          <span class="bar-row__label">${question.type === 'checkbox' ? `<i class="bar-row__box"></i>` : `<i class="bar-row__dot">${String.fromCharCode(65 + ((optionIndex.get(String(label)) ?? index) % 26))}</i>`}${e(label)}</span>
+          <span class="bar-row__label">${question.type === 'checkbox' ? `<i class="bar-row__box"></i>` : (otherKeys.has(label)
+            ? `<i class="bar-row__dot bar-row__dot--other">${icon('edit', 9)}</i>`
+            : `<i class="bar-row__dot">${String.fromCharCode(65 + ((optionIndex.get(String(label)) ?? index) % 26))}</i>`)}${e(label)}</span>
           <span class="bar-row__value"><b>${formatNumber(count)}</b>${base ? `<small>${percent(count, base)}%</small>` : ''}</span>
         </div>
         <div class="bar-row__track"><span style="width:${count ? Math.max(3, (count / max) * 100) : 0}%"></span></div>
