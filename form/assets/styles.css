@@ -1813,11 +1813,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .answer-option--other { cursor: default; flex-wrap: wrap; align-items: flex-start; }
 .answer-option__choice {
   display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
-  flex: 1 1 auto; min-width: 0;
+  flex: 1 1 0%; min-width: 0; max-width: 100%;
 }
 .answer-option__choice .answer-option__text {
-  flex: 1 1 auto; min-width: 0; white-space: pre-line;
-  overflow-wrap: anywhere; word-break: break-word;
+  flex: 1 1 0%; width: 0; min-width: 0; max-width: 100%;
+  white-space: pre-line; overflow-wrap: anywhere; word-break: break-all;
 }
 .answer-option__choice .answer-option__mark,
 .answer-option__choice .answer-option__letter { margin-top: 2px; }
