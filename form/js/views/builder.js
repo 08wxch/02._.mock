@@ -32,7 +32,7 @@ function optionRows(question) {
     </div>`).join('')}
     ${canAddOther && question.other ? `<div class="opt-row opt-row--other" data-other-row>
       <span class="opt-row__mark">${question.type === 'checkbox' ? icon('check', 11) : String.fromCharCode(65 + options.length)}</span>
-      <input class="opt-row__input" type="text" value="${e(question.otherLabel || 'อื่น ๆ')}" data-other-label placeholder="อื่น ๆ" aria-label="ข้อความตัวเลือกอื่น ๆ">
+      <textarea class="opt-row__input opt-row__input--area" rows="1" data-other-label placeholder="อื่น ๆ" aria-label="ข้อความตัวเลือกอื่น ๆ">${e(question.otherLabel || 'อื่น ๆ')}</textarea>
       <span class="opt-row__tag">${icon('edit', 11)} ผู้ตอบพิมพ์เอง</span>
       <button class="icon-btn icon-btn--quiet opt-row__remove" type="button" data-other-remove aria-label="ลบตัวเลือกอื่น ๆ">${icon('x', 15)}</button>
     </div>` : ''}
@@ -782,6 +782,7 @@ export async function builderView({ session, formId }) {
       } else if (target.matches('[data-other-label]')) {
         const question = findQuestion(target.closest('[data-qid]')?.dataset.qid);
         if (question) question.otherLabel = target.value;
+        autoGrow(target);
         setDirty();
       } else if (target.matches('[data-confirmation]')) {
         draft.settings.confirmation = target.value;
