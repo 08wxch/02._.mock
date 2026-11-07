@@ -192,6 +192,11 @@ export async function publicView({ slug }) {
 
     const pageFor = question => question.closest('[data-page]');
     const pageIndexOf = element => pageEls.indexOf(element);
+    const growOther = field => {
+      if (!field) return;
+      field.style.height = 'auto';
+      field.style.height = `${Math.min(field.scrollHeight || 34, 160)}px`;
+    };
 
     const showPage = (index, { scroll = true } = {}) => {
       currentPage = Math.max(0, Math.min(index, pages.length - 1));
@@ -201,6 +206,7 @@ export async function publicView({ slug }) {
       if (submitWrap) submitWrap.hidden = currentPage !== pages.length - 1;
       if (stepNav) stepNav.hidden = pages.length <= 1;
       if (pageLabel) pageLabel.textContent = pages.length > 1 ? `หน้า ${currentPage + 1} จาก ${pages.length}` : '';
+      pageEls[currentPage]?.querySelectorAll('[data-other-input]').forEach(growOther);
       if (scroll) card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
@@ -242,6 +248,7 @@ export async function publicView({ slug }) {
 
     formEl.addEventListener('input', event => {
       if (event.target.matches('[data-other-input]')) {
+        growOther(event.target);
         const choice = formEl.querySelector(`[data-other-choice="${event.target.dataset.otherInput}"]`);
         if (choice) choice.checked = true;
       }

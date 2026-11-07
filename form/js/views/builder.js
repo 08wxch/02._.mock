@@ -633,6 +633,11 @@ export async function builderView({ session, formId }) {
     const label = root.querySelector('[data-preview-label]');
     const answerQuestions = cleanQuestions().filter(question => isAnswerable(question.type));
     let current = 0;
+    const growOther = field => {
+      if (!field) return;
+      field.style.height = 'auto';
+      field.style.height = `${Math.min(field.scrollHeight || 34, 160)}px`;
+    };
 
     const showPage = index => {
       current = Math.max(0, Math.min(index, pagesEls.length - 1));
@@ -642,6 +647,7 @@ export async function builderView({ session, formId }) {
       if (submit) submit.hidden = current !== pagesEls.length - 1;
       if (nav) nav.hidden = pagesEls.length <= 1;
       if (label) label.textContent = pagesEls.length > 1 ? `หน้า ${current + 1} จาก ${pagesEls.length}` : '';
+      pagesEls[current]?.querySelectorAll('[data-other-input]').forEach(growOther);
     };
 
     const showErrors = errors => {
@@ -673,6 +679,7 @@ export async function builderView({ session, formId }) {
 
     root.addEventListener('input', event => {
       if (event.target.matches('[data-other-input]')) {
+        growOther(event.target);
         const choice = root.querySelector(`[data-other-choice="${event.target.dataset.otherInput}"]`);
         if (choice) choice.checked = true;
       }

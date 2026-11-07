@@ -144,7 +144,7 @@ export function questionInputMarkup(question, index, { preview = false, value = 
           <span class="answer-option__letter">${String.fromCharCode(65 + options.length)}</span>
           <span class="answer-option__text answer-other__label">${e(q.otherLabel || 'อื่น ๆ')}</span>
         </label>
-        <input class="answer-other__input" type="text" data-other-input="${e(q.id)}" value="${e(otherValue)}" placeholder="พิมพ์คำตอบของคุณ…" ${disabled}>
+        <textarea class="answer-other__input" rows="1" data-other-input="${e(q.id)}" placeholder="พิมพ์คำตอบของคุณ…" ${disabled}>${e(otherValue)}</textarea>
       </div>` : ''}
     </div>`;
   } else if (q.type === 'dropdown') {
