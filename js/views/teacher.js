@@ -33,6 +33,7 @@ import { cloudLogout } from '../cloud.js';
 import { mathText } from '../math.js';
 import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { navigate, refreshRoute } from '../router.js';
+import { downloadExamFile } from '../examFile.js';
 import { openAccountProfile } from '../profile.js';
 
 export function teacherShell(session, { active = 'dashboard', crumb = 'ภาพรวม', content = '' } = {}) {
@@ -493,6 +494,8 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
     <div class="exam-admin-head__actions">
       ${canRemind && metrics.pendingReview ? `<button class="btn btn--ghost" type="button" data-remind-exam>${icon('bell', 15)} แจ้งเตือนครู</button>` : ''}
       ${canEdit ? `<a class="btn btn--ghost" href="#/teacher/exam/${exam.id}/preview">${icon('eye', 15)} พรีวิวข้อสอบ</a>` : ''}
+      ${canEdit ? `<button class="btn btn--ghost" type="button" data-duplicate-exam>${icon('copy', 15)} คัดลอกชุดสอบ</button>` : ''}
+      ${canEdit ? `<button class="icon-btn" type="button" data-export-exam-json title="ส่งออกไฟล์ชุดสอบ" aria-label="ส่งออกไฟล์ชุดสอบ">${icon('download', 15)}</button>` : ''}
       ${canEdit ? `<a class="icon-btn" href="#/teacher/exam/${exam.id}/edit" title="แก้ไขชุดสอบ" aria-label="แก้ไขชุดสอบ">${icon('edit', 15)}</a>` : ''}
       ${canManage ? `<button class="icon-btn icon-btn--danger" type="button" data-delete-exam="${exam.id}" title="ลบชุดสอบ" aria-label="ลบชุดสอบ">${icon('trash', 15)}</button>` : ''}
       ${!canEdit ? `<span class="exam-readonly-note">${icon(canReview ? 'clipboard-check' : 'eye', 13)} ${canReview ? 'อ่านข้อมูล · ตรวจคำตอบได้' : 'ดูข้อมูลจากเจ้าของชุดสอบ'}</span>` : !canManage ? `<span class="exam-readonly-note">${icon('edit', 13)} แก้ไขร่วม · เปลี่ยนสถานะไม่ได้</span>` : exam.status === 'draft'
@@ -519,7 +522,7 @@ function examHeader(exam, metrics, { tab = 'overview', canManage = false, canEdi
   ${!canViewStats ? `<div class="exam-stats-locked">${icon('lock', 13)} ชุดสอบนี้ตั้งค่าให้ครูท่านอื่นไม่สามารถแก้ไขได้ · สถิติจะเปิดให้ดูเมื่อปิดสอบแล้ว</div>` : ''}`;
 }
 
-function overviewTab(exam, metrics, canManage = false, canViewStats = true, canReview = false) {
+function overviewTab(exam, metrics, canManage = false, canViewStats = true, canReview = false, canEdit = false) {
   const db = getDB();
   const reviewers = (exam.reviewerIds || [])
     .map(id => db.teachers.find(t => t.id === id && !t.deletedAt))
@@ -589,6 +592,12 @@ function overviewTab(exam, metrics, canManage = false, canViewStats = true, canR
           <div class="overview-info-row"><span>${icon(exam.shareMode === 'edit' ? 'edit' : 'eye', 11)} สิทธิ์การเข้าถึง</span><strong>${exam.shareMode === 'edit' ? 'ครูท่านอื่นสามารถแก้ไขได้' : 'ครูท่านอื่นไม่สามารถแก้ไขได้'}</strong></div>
         </div>
       </div>
+      ${canEdit ? `<div class="overview-panel card">
+        <div class="overview-panel__head"><div><h2>สำรองชุดข้อสอบ</h2><p>เก็บไว้เป็นคลังข้อสอบหรือนำไปสร้างชุดใหม่</p></div></div>
+        <p style="font-size:9.5px;color:var(--muted);line-height:1.65;margin:0 0 10px">ดาวน์โหลดข้อสอบทั้งชุดเป็นไฟล์ .json เพื่อเก็บในเครื่อง แล้วนำเข้าได้จากหน้า “สร้างชุดสอบใหม่”</p>
+        <button class="btn btn--soft btn--sm btn--wide" type="button" data-export-exam-json>${icon('download', 12)} ส่งออกไฟล์ชุดสอบ</button>
+        <p style="font-size:8.5px;color:var(--muted-2);line-height:1.6;margin:8px 0 0">${icon('info', 10)} ไฟล์เก็บข้อความ ตัวเลือก เฉลย และการตั้งค่า · ไม่รวมผลสอบหรือรายชื่อผู้เข้าสอบ</p>
+      </div>` : ''}
       <div class="overview-panel card">
         <div class="overview-panel__head"><div><h2>ผู้ตรวจคำตอบ</h2></div>${canManage ? `<button class="btn btn--link" style="font-size:9px" type="button" data-edit-reviewers>เลือกผู้ตรวจ</button>` : ''}</div>
         ${reviewers.length
@@ -1485,7 +1494,7 @@ export function teacherExamView(ctx) {
   if (tab === 'students') tabContent = studentsTab(exam, metrics);
   else if (tab === 'grading') tabContent = gradingTab(exam, metrics);
   else if (tab === 'stats') tabContent = statsTab(exam, metrics);
-  else tabContent = overviewTab(exam, metrics, canManage, canViewStats, canReview);
+  else tabContent = overviewTab(exam, metrics, canManage, canViewStats, canReview, canEdit);
   const content = `${examHeader(exam, metrics, { tab, canManage, canEdit, canViewStats, canReview, canRemind })}
     <div data-tab-content>${tabContent}</div>`;
   return {
@@ -1498,6 +1507,22 @@ export function teacherExamView(ctx) {
           pending: metrics.pendingReview
         }, session);
       });
+      if (canEdit) {
+        document.querySelectorAll('[data-export-exam-json]').forEach(btn => btn.addEventListener('click', () => {
+          downloadExamFile(exam);
+          toast(`ดาวน์โหลดไฟล์ “${exam.title}” แล้ว`, 'success');
+        }));
+        document.querySelectorAll('[data-duplicate-exam]').forEach(btn => btn.addEventListener('click', async () => {
+          const ok = await confirmDialog({
+            title: 'คัดลอกชุดสอบนี้?',
+            message: 'ระบบจะเปิดหน้าสร้างชุดใหม่ พร้อมข้อสอบ การตั้งค่า และรายชื่อผู้เข้าสอบจากชุดนี้ · ยังไม่บันทึกจนกว่าจะกดบันทึก และสามารถปรับวันเวลาได้',
+            confirmLabel: 'คัดลอกชุดสอบ',
+            iconName: 'copy'
+          });
+          if (!ok) return;
+          navigate(`/teacher/create?copy=${exam.id}`);
+        }));
+      }
       if (canManage) {
         bindExamActions(exam, session);
         if (tab === 'students') bindStudentsTab(exam, metrics);

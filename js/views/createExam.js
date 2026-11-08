@@ -6,6 +6,7 @@ import { mathText } from '../math.js';
 import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { cloudUploadQuestionImage } from '../cloud.js';
 import { navigate } from '../router.js';
+import { parseExamFile } from '../examFile.js';
 import { teacherShell, mountTeacherShell } from './teacher.js';
 
 let draft = null;
@@ -112,6 +113,27 @@ function examToDraft(exam) {
     shareMode: exam.shareMode === 'edit' ? 'edit' : 'view',
     assignedStudentIds: assigned,
     questions: (exam.questions || []).map(normalizeDraftQuestion)
+  };
+}
+
+function duplicateExamDraft(exam) {
+  const base = examToDraft(exam);
+  const questions = (base.questions || []).map(question => {
+    const copy = normalizeDraftQuestion(question);
+    copy.id = uid('q');
+    copy.options = (copy.options || []).map(option => ({ ...option }));
+    return copy;
+  });
+  return {
+    ...base,
+    examId: null,
+    copySourceId: exam.id,
+    title: `${exam.title || 'ชุดสอบ'} (สำเนา)`.slice(0, 90),
+    status: 'draft',
+    openAt: toDateTimeLocal(new Date()),
+    closeAt: toDateTimeLocal(new Date(Date.now() + 24 * 60 * 60_000)),
+    questions,
+    activeQuestionId: questions[0]?.id || ''
   };
 }
 
@@ -686,6 +708,81 @@ function sampleDraft() {
   ];
 }
 
+async function importExamFile(root, file, session) {
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) {
+    toast('ไฟล์มีขนาดใหญ่เกิน 15 MB', 'error', 5000);
+    return;
+  }
+  let parsed;
+  try {
+    parsed = parseExamFile(await file.text());
+  } catch {
+    toast('อ่านไฟล์ไม่สำเร็จ กรุณาเลือกไฟล์ใหม่อีกครั้ง', 'error', 5000);
+    return;
+  }
+  if (!parsed.ok) {
+    toast(parsed.error || 'ไฟล์ชุดสอบไม่ถูกต้อง', 'error', 6500);
+    return;
+  }
+  syncDraft(root);
+  const hasContent = Boolean(draft.title.trim()) || draft.questions.some(question => !isBlankDraftQuestion(question));
+  if (hasContent) {
+    const ok = await confirmDialog({
+      title: 'นำเข้าทับข้อมูลในฟอร์ม?',
+      message: `ข้อมูลชุดสอบที่กำลังทำอยู่จะถูกแทนที่ด้วยไฟล์ “${file.name}” · ยังไม่บันทึกลงระบบจนกว่าจะกดบันทึก`,
+      confirmLabel: 'นำเข้าไฟล์นี้',
+      iconName: 'file-text'
+    });
+    if (!ok) return;
+  }
+  const data = parsed.exam;
+  if (draft.copySourceId || draft.copyErrorId) {
+    draft.copySourceId = null;
+    draft.copyErrorId = null;
+    try { window.history.replaceState(null, '', '#/teacher/create'); } catch {}
+    root.querySelector('.create-head + .notice-strip--info')?.remove();
+  }
+  draft.title = data.title || file.name.replace(/\.json$/i, '').slice(0, 90) || 'ชุดสอบจากไฟล์';
+  draft.level = data.level || '';
+  draft.description = data.description || '';
+  draft.instructions = data.instructions || '';
+  draft.duration = data.duration;
+  draft.passPercent = data.passPercent;
+  draft.shareMode = data.shareMode;
+  draft.questions = data.questions.map(question => {
+    const imported = normalizeDraftQuestion(question);
+    imported.id = uid('q');
+    imported.options = (imported.options || []).map(option => ({ ...option }));
+    return imported;
+  });
+  draft.activeQuestionId = draft.questions[0]?.id || '';
+  const allowed = new Set(participantStudents(session, getDB(), draft.orgIds).map(student => student.id));
+  draft.assignedStudentIds = draft.assignedStudentIds.filter(id => allowed.has(id));
+  const values = {
+    title: draft.title,
+    level: draft.level,
+    description: draft.description,
+    instructions: draft.instructions,
+    duration: draft.duration,
+    passPercent: draft.passPercent,
+    shareMode: draft.shareMode
+  };
+  root.querySelectorAll('[data-field]').forEach(input => {
+    const key = input.dataset.field;
+    if (key in values && key !== 'subject') input.value = values[key];
+  });
+  const panel = root.querySelector('[data-participant-panel]');
+  if (panel) panel.innerHTML = participantSection(getDB(), session, draft.orgIds);
+  applyParticipantFilter(root);
+  renderQuestions(root);
+  updateParticipantState(root);
+  updateSummary(root);
+  updatePreview(root);
+  toast(`นำเข้าชุดสอบ “${draft.title}” ${draft.questions.length} ข้อแล้ว · อย่าลืมเลือกผู้เข้าสอบและตั้งเวลา`, 'success', 5600);
+  root.querySelector('.create-shell')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 export function createExamView(ctx) {
   const { session } = ctx;
   const db = getDB();
@@ -715,9 +812,19 @@ export function createExamView(ctx) {
     };
   }
 
+  const copySourceId = !isEdit ? (ctx.query?.get('copy') || '') : '';
   if (isEdit) {
     if (!draft || draft.examId !== sourceExam.id) draft = examToDraft(sourceExam);
-  } else if (!draft || draft.examId) {
+  } else if (copySourceId) {
+    const copySource = findExam(copySourceId);
+    if (copySource && canViewExam(copySource, session) && canEditExam(copySource, session)) {
+      if (!draft || draft.copySourceId !== copySource.id) draft = duplicateExamDraft(copySource);
+    } else if (!draft || draft.copyErrorId !== copySourceId) {
+      draft = createExamDraft();
+      draft.copyErrorId = copySourceId;
+      toast('ไม่พบชุดสอบต้นทาง หรือคุณไม่มีสิทธิ์คัดลอกชุดนี้', 'error', 5000);
+    }
+  } else if (!draft || draft.examId || draft.copySourceId || draft.copyErrorId) {
     draft = createExamDraft();
   }
 
@@ -775,9 +882,12 @@ export function createExamView(ctx) {
         <p>${isEdit ? 'ปรับคำถาม ผู้เข้าสอบ และรายละเอียด แล้วบันทึกการเปลี่ยนแปลงได้ทันที' : 'ออกแบบข้อสอบ กำหนดคำตอบที่ถูก และเปิดห้องสอบได้ในไม่กี่นาที'}</p>
       </div>
       <div class="teacher-page-head__actions">
+        ${!isEdit ? `<button class="btn btn--ghost" type="button" data-import-exam>${icon('file-text', 15)} นำเข้าไฟล์ชุดสอบ</button>` : ''}
         <button class="btn btn--ghost" type="button" data-fill-sample>${icon('sparkles', 15)} เติมตัวอย่าง</button>
       </div>
+      <input type="file" accept=".json,application/json" data-import-exam-input hidden>
     </div>
+    ${draft.copySourceId ? `<div class="notice-strip notice-strip--info" style="margin-bottom:14px">${icon('copy', 14)}<span>คัดลอกชุดสอบต้นทางแล้ว · ยังไม่บันทึกเป็นชุดใหม่จนกว่าจะกดบันทึก และอย่าลืมตรวจวันเวลาและผู้เข้าสอบ</span></div>` : ''}
     <div class="create-layout">
       <form class="create-form" id="create-exam-form" novalidate>
         <section class="form-card">
@@ -888,6 +998,13 @@ export function createExamView(ctx) {
       const root = document.querySelector('.create-shell');
       const form = document.getElementById('create-exam-form');
       root.dataset.previewQuestion = activeQuestion()?.id || '';
+      const importInput = root.querySelector('[data-import-exam-input]');
+      root.querySelector('[data-import-exam]')?.addEventListener('click', () => importInput?.click());
+      importInput?.addEventListener('change', async () => {
+        const file = importInput.files?.[0];
+        importInput.value = '';
+        if (file) await importExamFile(root, file, session);
+      });
 
       const refresh = () => {
         syncDraft(root);
