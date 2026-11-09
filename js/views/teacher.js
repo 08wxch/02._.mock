@@ -346,7 +346,7 @@ export function teacherExamsView(ctx) {
     const statsVisible = canViewExamStats(exam, session);
     const creator = creatorOfExam(exam, db);
     const draftNote = exam.status === 'draft'
-      ? `<span class="exam-admin-card__privacy">${icon('lock', 10)} ฉบับร่าง · เห็นเฉพาะเจ้าของ ผู้จัดการหน่วยงาน และ Wich</span>`
+      ? `<span class="exam-admin-card__privacy">${icon('lock', 10)} ฉบับร่าง · เฉพาะคุณเท่านั้นที่เห็นได้</span>`
       : '';
     const examOrg = examOrganizationName(exam, db);
     const examOrgIds = examOrganizationIds(exam, db);
