@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { cloudSetPassword, cloudGetPassword, cloudSetCode, cloudSyncCredentials, cloudRepairTeacherCodes, hasCloudSession } from '../cloud.js';
+import { cloudSetPassword, cloudGetPassword, cloudSetCode, cloudRepairTeacherCodes, hasCloudSession } from '../cloud.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, shortThaiDate, longThaiDate,
   relativeTime, formatNumber, formatStopwatch, percent, clamp,
@@ -2487,7 +2487,7 @@ export function teacherStaffView(ctx) {
   const content = `<div class="teacher-page-head">
     <div><div class="eyebrow">${icon('school', 12)} การจัดการทีม</div><h1>ครูและบุคลากร</h1><p>${globalAccess ? `${e(myOrg?.name || 'หน่วยงานของฉัน')} · ${e(myOrg?.shortName || '—')}` : canManageOrgs ? `จัดการบัญชีครูใน ${e(scopeName)} · หน่วยงานนี้มีสิทธิ์จัดการองค์กร` : manager ? `ผู้จัดการใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว` : `บุคลากรใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว`}</p></div>
     <div class="teacher-page-head__actions">
-      ${owner || canManageOrgs ? `<button class="btn btn--ghost" type="button" data-resync-codes>${icon('refresh', 15)} ซ่อมรหัสเข้าสู่ระบบ</button>` : ''}
+      ${owner || canManageOrgs ? `<button class="btn btn--ghost" type="button" data-resync-codes>${icon('refresh', 15)} ซ่อมรหัสครู</button>` : ''}
       ${owner || canManageOrgs ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} สร้างบัญชีครู / ผู้จัดการ</button>` : `<span class="badge badge--neutral">${icon('eye', 11)} อ่านอย่างเดียว</span>`}
     </div>
   </div>
@@ -2498,6 +2498,7 @@ export function teacherStaffView(ctx) {
     <div class="overview-metric"><span>${icon('graduation-cap', 11)} นักเรียนในขอบเขต</span><strong>${scopedStudents.length} <small>คน</small></strong></div>
     <div class="overview-metric"><span>${icon('file-text', 11)} class</span><strong>${scopedClasses.length} <small>class</small></strong></div>
   </div>
+  ${owner || canManageOrgs ? `<div class="notice-strip notice-strip--info" style="margin-bottom:14px">${icon('info', 15)}<span><strong>รหัสครูไม่ตรงกับ 02._.admin?</strong> กด “ซ่อมรหัสครู” ด้านบน เพื่อส่งรหัสล่าสุดขึ้นฐานข้อมูลกลาง · รหัสผ่านจะไม่ถูกแก้</span></div>` : ''}
   ${globalAccess ? `<div class="table-toolbar staff-toolbar">${filterSelect}<span class="table-caption">แสดง ${teachers.length} คน · ${e(scopeName)}</span></div>` : ''}
   <div class="notice-strip notice-strip--info" style="margin-bottom:16px">${icon('shield-check', 15)}<span><strong>สิทธิ์:</strong> ${globalAccess ? 'หน่วยงานหลักเห็นข้อมูลบุคลากร นักเรียน และชุดสอบของทุกหน่วยงาน' : 'ครูในหน่วยงานเห็นนักเรียนและบุคลากรของหน่วยงานตนเองเท่านั้น'}</span></div>
   <div class="staff-grid">${cards || `<div class="card">${emptyState({ iconName: 'users', title: 'ยังไม่มีบุคลากรในขอบเขตนี้', text: owner || canManageOrgs ? 'สร้างบัญชีครูคนแรกในหน่วยงานนี้' : 'ยังไม่มีบัญชีครูในหน่วยงานของคุณ' })}</div>`}</div>`;
@@ -2509,7 +2510,7 @@ export function teacherStaffView(ctx) {
         const btn = ev.currentTarget;
         const ok = await confirmDialog({
           title: 'ซ่อมรหัสเข้าสู่ระบบ?',
-          message: 'ระบบจะส่งรหัสครู รหัสนักเรียน และรหัสผ่านที่แสดงใน 02._.mock ขึ้นฐานข้อมูลกลางใหม่ทั้งหมด เพื่อให้ 02._.admin และหน้าล็อกอินใช้รหัสเดียวกับที่เห็นบนหน้าจอ',
+          message: 'ระบบจะส่ง “รหัสครู” ที่แสดงใน 02._.mock ขึ้นฐานข้อมูลกลางใหม่ เพื่อให้ 02._.admin และหน้าล็อกอินใช้รหัสเดียวกับที่เห็นบนหน้าจอ · รหัสผ่านจะไม่ถูกเปลี่ยน',
           confirmLabel: 'ซ่อมรหัส',
           iconName: 'refresh'
         });
@@ -2517,15 +2518,13 @@ export function teacherStaffView(ctx) {
         btn.disabled = true;
         btn.innerHTML = `${icon('refresh', 15)} กำลังซ่อม...`;
         const codes = await cloudRepairTeacherCodes(getDB());
-        const credentials = await cloudSyncCredentials(getDB());
         btn.disabled = false;
-        btn.innerHTML = `${icon('refresh', 15)} ซ่อมรหัสเข้าสู่ระบบ`;
-        const failed = [...(codes.failed || []), ...(credentials.failed || [])];
-        if (failed.length) {
-          toast(`ซ่อมรหัสไม่ครบ ${failed.length} รายการ · ${failed.slice(0, 3).join(', ')}`, 'error', 6500);
+        btn.innerHTML = `${icon('refresh', 15)} ซ่อมรหัสครู`;
+        if (!codes.ok) {
+          toast(`ซ่อมรหัสครูไม่ครบ ${codes.failed?.length || 0} บัญชี · ${codes.failed?.slice(0, 3).join(', ') || ''}`, 'error', 6500);
           return;
         }
-        toast(`ซ่อมรหัสเข้าสู่ระบบแล้ว · รหัสครู ${codes.synced} บัญชี · รหัสผ่าน ${credentials.synced} บัญชี`, 'success', 5000);
+        toast(`ซ่อมรหัสครูแล้ว ${codes.synced} บัญชี · รหัสผ่านไม่ถูกแก้ไข`, 'success', 5000);
       });
       document.querySelector('[data-create-teacher]')?.addEventListener('click', () => openCreateTeacherModal(session, orgFilter === 'all' ? orgs[0]?.id : orgFilter));
       document.querySelector('[data-create-org]')?.addEventListener('click', () => openOrganizationModal(null, session));

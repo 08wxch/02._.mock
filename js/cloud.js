@@ -10,6 +10,7 @@ let ready = false;
 let lastStamp = '';
 let lastAttempts = new Map();
 let lastCredentials = new Map();
+const credentialDirty = new Set();
 let lastStateCounts = { students: 0, exams: 0 };
 let lastStateMeta = {};
 let lastPeople = new Map();
@@ -200,6 +201,10 @@ export function isCloudEnabled() {
 
 export function isCloudReady() {
   return ready;
+}
+
+export function markCredentialDirty(role, id) {
+  if (role && id) credentialDirty.add(`${role}:${id}`);
 }
 
 export function hasCloudSession() {
@@ -491,10 +496,10 @@ async function persistSnapshot(state, attempts, cleanup = null) {
     const staleCredentials = [];
     for (const row of credentialRows) {
       const key = `${row.owner_type}:${row.owner_id}`;
-      // Do not rewrite a password that was changed from another app (for
-      // example 02._.admin) after this tab loaded. Only push values that differ
-      // from what we last read/wrote.
-      if (lastCredentials.get(key) === row.password) continue;
+      // Only push a password this tab actually changed. Saving unrelated data
+      // must never overwrite a newer password set from 02._.admin or login.
+      if (!credentialDirty.has(key)) continue;
+      if (lastCredentials.get(key) === row.password) { credentialDirty.delete(key); continue; }
       const { error: credError } = await supa.from('credentials').upsert(row, { onConflict: 'owner_type,owner_id' });
       if (credError) {
         staleCredentials.push(row.owner_id);
@@ -502,6 +507,7 @@ async function persistSnapshot(state, attempts, cleanup = null) {
         continue;
       }
       lastCredentials.set(key, row.password);
+      credentialDirty.delete(key);
     }
     if (staleCredentials.length) {
       window.dispatchEvent(new CustomEvent('examio:cloud-error', {
@@ -622,6 +628,7 @@ export async function cloudSetPassword(role, id, password) {
     const body = await callAccounts({ action: 'password', role, id, password: next });
     if (body.ok === false) return { ok: false, error: body.error };
     lastCredentials.set(`${role}:${id}`, next);
+    credentialDirty.delete(`${role}:${id}`);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err?.message || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ' };
@@ -676,10 +683,11 @@ export async function cloudSyncCredentials(state = null) {
   const failed = [];
   for (const row of rows) {
     const key = `${row.owner_type}:${row.owner_id}`;
-    if (!row.owner_id || lastCredentials.get(key) === row.password) continue;
+    if (!row.owner_id || !credentialDirty.has(key) || lastCredentials.get(key) === row.password) continue;
     const { error } = await supa.from('credentials').upsert(row, { onConflict: 'owner_type,owner_id' });
     if (error) { failed.push(row.owner_id); continue; }
     lastCredentials.set(key, row.password);
+    credentialDirty.delete(key);
     synced += 1;
   }
   return { ok: failed.length === 0, synced, failed };
