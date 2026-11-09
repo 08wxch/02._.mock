@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { cloudSetPassword, cloudGetPassword, cloudSetCode, cloudSyncCredentials, hasCloudSession } from '../cloud.js';
+import { cloudSetPassword, cloudGetPassword, cloudSetCode, cloudSyncCredentials, cloudRepairTeacherCodes, hasCloudSession } from '../cloud.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, shortThaiDate, longThaiDate,
   relativeTime, formatNumber, formatStopwatch, percent, clamp,
@@ -2516,14 +2516,16 @@ export function teacherStaffView(ctx) {
         if (!ok) return;
         btn.disabled = true;
         btn.innerHTML = `${icon('refresh', 15)} กำลังซ่อม...`;
-        const result = await cloudSyncCredentials(getDB());
+        const codes = await cloudRepairTeacherCodes(getDB());
+        const credentials = await cloudSyncCredentials(getDB());
         btn.disabled = false;
         btn.innerHTML = `${icon('refresh', 15)} ซ่อมรหัสเข้าสู่ระบบ`;
-        if (!result.ok) {
-          toast(`ซ่อมรหัสไม่ครบ ${result.failed?.length || 0} บัญชี · ${result.failed?.slice(0, 3).join(', ') || ''}`, 'error', 6000);
+        const failed = [...(codes.failed || []), ...(credentials.failed || [])];
+        if (failed.length) {
+          toast(`ซ่อมรหัสไม่ครบ ${failed.length} รายการ · ${failed.slice(0, 3).join(', ')}`, 'error', 6500);
           return;
         }
-        toast(`ซ่อมรหัสเข้าสู่ระบบแล้ว ${result.synced} บัญชี`, 'success', 4200);
+        toast(`ซ่อมรหัสเข้าสู่ระบบแล้ว · รหัสครู ${codes.synced} บัญชี · รหัสผ่าน ${credentials.synced} บัญชี`, 'success', 5000);
       });
       document.querySelector('[data-create-teacher]')?.addEventListener('click', () => openCreateTeacherModal(session, orgFilter === 'all' ? orgs[0]?.id : orgFilter));
       document.querySelector('[data-create-org]')?.addEventListener('click', () => openOrganizationModal(null, session));

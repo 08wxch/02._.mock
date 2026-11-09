@@ -647,6 +647,24 @@ export function cloudSave(db) {
   return saveQueue;
 }
 
+export async function cloudRepairTeacherCodes(state = null) {
+  if (!ready || !current || current.role !== 'teacher' || !state) return { ok: true, synced: 0, failed: [] };
+  const failed = [];
+  let synced = 0;
+  for (const teacher of (state.teachers || []).filter(t => !t.deletedAt && t.code)) {
+    try {
+      // The existing "sync" action updates profiles.login_code. Send an empty
+      // password so repairing a code never overwrites the current password.
+      await syncAccounts([{ person: { ...teacher, password: '' }, role: 'teacher' }]);
+      synced += 1;
+    } catch (err) {
+      failed.push(teacher.code);
+      console.error('Teacher code repair failed', teacher.code, err);
+    }
+  }
+  return { ok: failed.length === 0, synced, failed };
+}
+
 export async function cloudSyncCredentials(state = null) {
   if (!ready || !current || current.role !== 'teacher' || !state) return { ok: true, synced: 0 };
   const supa = getClient();
