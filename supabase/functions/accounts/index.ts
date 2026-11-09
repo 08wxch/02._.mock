@@ -164,6 +164,48 @@ serve(async (req) => {
       return json({ ok: results.every(r => r.ok), results });
     }
 
+    const canManageTeacherCode = (targetId: string) => {
+      if (!callerIsTeacher) return { ok: false, error: 'teacher account required' };
+      if (caller.is_owner) return { ok: true };
+      if (callerProfile.teacher_id === targetId) return { ok: true };
+      const target = (state?.data?.teachers || []).find((t: any) => t.id === targetId);
+      const isManager = String(callerTeacher?.staffRole || '') === 'manager';
+      if (isManager && target && target.orgId === callerProfile.org_id) return { ok: true };
+      return { ok: false, error: 'forbidden' };
+    };
+
+    if (body.action === 'code') {
+      const role = body.role === 'teacher' ? 'teacher' : 'student';
+      const id = clean(body.id, 100);
+      const code = clean(body.code, 64).toUpperCase();
+      if (!id) return json({ error: 'missing id' }, 400);
+      const column = role === 'teacher' ? 'teacher_id' : 'student_id';
+      if (role === 'teacher') {
+        const permission = canManageTeacherCode(id);
+        if (!permission.ok) return json({ error: permission.error }, 403);
+        const target = (state?.data?.teachers || []).find((t: any) => t.id === id);
+        if (target?.isOwner) return json({ error: 'owner code is protected' }, 403);
+        if (!/^[A-Z0-9._-]{3,24}$/.test(code)) return json({ error: 'invalid code format' }, 400);
+      } else {
+        if (!callerIsTeacher) return json({ error: 'teacher account required' }, 403);
+        if (!/^[A-Z0-9._-]{3,20}$/.test(code)) return json({ error: 'invalid code format' }, 400);
+      }
+      const { data: profile, error } = await admin
+        .from('profiles')
+        .select('user_id, org_id')
+        .eq(column, id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!profile?.user_id) return json({ error: 'account not provisioned' }, 404);
+      if (role === 'student' && !caller.is_owner && profile.org_id !== callerProfile.org_id) {
+        return json({ error: 'forbidden' }, 403);
+      }
+      const { error: codeError } = await admin.from('profiles').update({ login_code: code }).eq('user_id', profile.user_id);
+      if (codeError) throw codeError;
+      await admin.auth.admin.updateUserById(profile.user_id, { user_metadata: { login_code: code } });
+      return json({ ok: true, code });
+    }
+
     if (body.action === 'reveal') {
       const role = body.role === 'teacher' ? 'teacher' : 'student';
       const id = clean(body.id, 100);

@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { cloudSetPassword, cloudGetPassword } from '../cloud.js';
+import { cloudSetPassword, cloudGetPassword, cloudSetCode, cloudSyncCredentials, hasCloudSession } from '../cloud.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, shortThaiDate, longThaiDate,
   relativeTime, formatNumber, formatStopwatch, percent, clamp,
@@ -34,7 +34,7 @@ import { mathText } from '../math.js';
 import { questionImageHTML, optionImageHTML } from '../questionMedia.js';
 import { navigate, refreshRoute } from '../router.js';
 import { downloadExamFile } from '../examFile.js';
-import { openAccountProfile } from '../profile.js';
+import { openAccountProfile, passwordIssue, passwordStrength, verifyAccountPassword } from '../profile.js';
 
 export function teacherShell(session, { active = 'dashboard', crumb = 'ภาพรวม', content = '' } = {}) {
   const db = getDB();
@@ -2487,6 +2487,7 @@ export function teacherStaffView(ctx) {
   const content = `<div class="teacher-page-head">
     <div><div class="eyebrow">${icon('school', 12)} การจัดการทีม</div><h1>ครูและบุคลากร</h1><p>${globalAccess ? `${e(myOrg?.name || 'หน่วยงานของฉัน')} · ${e(myOrg?.shortName || '—')}` : canManageOrgs ? `จัดการบัญชีครูใน ${e(scopeName)} · หน่วยงานนี้มีสิทธิ์จัดการองค์กร` : manager ? `ผู้จัดการใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว` : `บุคลากรใน ${e(scopeName)} · ดูข้อมูลได้อย่างเดียว`}</p></div>
     <div class="teacher-page-head__actions">
+      ${owner || canManageOrgs ? `<button class="btn btn--ghost" type="button" data-resync-codes>${icon('refresh', 15)} ซ่อมรหัสเข้าสู่ระบบ</button>` : ''}
       ${owner || canManageOrgs ? `<button class="btn btn--primary" type="button" data-create-teacher>${icon('plus', 16)} สร้างบัญชีครู / ผู้จัดการ</button>` : `<span class="badge badge--neutral">${icon('eye', 11)} อ่านอย่างเดียว</span>`}
     </div>
   </div>
@@ -2504,6 +2505,26 @@ export function teacherStaffView(ctx) {
     html: teacherShell(session, { active: 'staff', crumb: 'ครูและบุคลากร', content }),
     mount() {
       mountTeacherShell(session);
+      document.querySelector('[data-resync-codes]')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        const ok = await confirmDialog({
+          title: 'ซ่อมรหัสเข้าสู่ระบบ?',
+          message: 'ระบบจะส่งรหัสครู รหัสนักเรียน และรหัสผ่านที่แสดงใน 02._.mock ขึ้นฐานข้อมูลกลางใหม่ทั้งหมด เพื่อให้ 02._.admin และหน้าล็อกอินใช้รหัสเดียวกับที่เห็นบนหน้าจอ',
+          confirmLabel: 'ซ่อมรหัส',
+          iconName: 'refresh'
+        });
+        if (!ok) return;
+        btn.disabled = true;
+        btn.innerHTML = `${icon('refresh', 15)} กำลังซ่อม...`;
+        const result = await cloudSyncCredentials(getDB());
+        btn.disabled = false;
+        btn.innerHTML = `${icon('refresh', 15)} ซ่อมรหัสเข้าสู่ระบบ`;
+        if (!result.ok) {
+          toast(`ซ่อมรหัสไม่ครบ ${result.failed?.length || 0} บัญชี · ${result.failed?.slice(0, 3).join(', ') || ''}`, 'error', 6000);
+          return;
+        }
+        toast(`ซ่อมรหัสเข้าสู่ระบบแล้ว ${result.synced} บัญชี`, 'success', 4200);
+      });
       document.querySelector('[data-create-teacher]')?.addEventListener('click', () => openCreateTeacherModal(session, orgFilter === 'all' ? orgs[0]?.id : orgFilter));
       document.querySelector('[data-create-org]')?.addEventListener('click', () => openOrganizationModal(null, session));
       document.querySelectorAll('[data-edit-org]').forEach(btn => btn.addEventListener('click', () => {
@@ -2553,37 +2574,123 @@ function maskStaffPassword(value) {
   return '•'.repeat(Math.max(6, Math.min(14, String(value || '').length)));
 }
 
-function openCodeEditModal({ kind, id, title, current, session }) {
+function codeChangeWarning(isTeacher, next, person) {
+  const warnings = [];
+  if (!hasCloudSession() || !navigator.onLine) {
+    warnings.push('ตอนนี้ระบบยังไม่ได้เชื่อมต่อฐานข้อมูลกลาง รหัสจะยังไม่ถูกใช้จนกว่าจะบันทึกขึ้นคลาวด์ได้');
+  }
+  if (isTeacher && person?.isOwner) warnings.push('บัญชีนี้เป็นเจ้าของระบบ พื้นที่ส่วนอื่นจะยังแสดงรหัสนี้อยู่');
+  if (person?.code && String(person.code).toUpperCase() !== String(next || '').toUpperCase()) {
+    warnings.push(`รหัสเดิม ${person.code} จะใช้เข้าสู่ระบบไม่ได้ทันทีหลังยืนยัน`);
+  }
+  return warnings;
+}
+
+function openCodeEditModal({ kind, id, title, current, session, person = null }) {
   const isTeacher = kind === 'teacher';
+  const maxLength = isTeacher ? 24 : 20;
   openModal({
     title,
     eyebrow: isTeacher ? 'แก้ไขรหัสครู' : 'แก้ไขรหัสนักเรียน',
     size: 'sm',
     body: `<form id="code-edit-form" novalidate>
-      <div class="field"><label for="code-edit-value">รหัสใหม่</label>
-        <input class="input input--lg" id="code-edit-value" name="code" value="${e(current)}" maxlength="${isTeacher ? 24 : 20}" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase" required autofocus>
-        <span class="field__hint">${isTeacher ? '3–24 ตัว ใช้ A–Z, 0–9, จุด, ขีดกลาง หรือขีดล่าง · ใช้เข้าสู่ระบบแทนรหัสเดิมทันที' : '3–20 ตัว ใช้ A–Z, 0–9, จุด, ขีดกลาง หรือขีดล่าง · ใช้เข้าสู่ระบบแทนรหัสเดิมทันที'}</span>
+      <div class="code-current">
+        <span>${icon('hash', 12)} รหัสปัจจุบัน</span>
+        <strong>${e(current)}</strong>
       </div>
+      <div class="field"><label for="code-edit-current">ยืนยันรหัสผ่านของผู้แก้ไข</label>
+        <input class="input" id="code-edit-current" type="password" maxlength="64" autocomplete="current-password" placeholder="กรอกรหัสผ่านปัจจุบันของคุณ" required>
+        <span class="field__hint">ใช้ยืนยันว่าคุณเป็นเจ้าของบัญชีจริงก่อนเปลี่ยนรหัสเข้าสู่ระบบ</span>
+      </div>
+      <div class="field"><label for="code-edit-value">รหัสใหม่</label>
+        <input class="input input--lg" id="code-edit-value" name="code" value="${e(current)}" maxlength="${maxLength}" autocomplete="off" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase" required autofocus>
+        <span class="field__hint">${isTeacher ? '3–24 ตัว ใช้ A–Z, 0–9, จุด, ขีดกลาง หรือขีดล่าง' : '3–20 ตัว ใช้ A–Z, 0–9, จุด, ขีดกลาง หรือขีดล่าง'} · ต้องไม่ซ้ำกับบัญชีอื่น</span>
+      </div>
+      <div class="field"><label for="code-edit-confirm">ยืนยันรหัสใหม่</label>
+        <input class="input" id="code-edit-confirm" name="confirm" maxlength="${maxLength}" autocomplete="off" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase" placeholder="พิมพ์รหัสใหม่อีกครั้ง" required>
+      </div>
+      <label class="check-row code-confirm-row">
+        <input type="checkbox" id="code-edit-ack">
+        <span class="check-box">${icon('check', 13)}</span>
+        <span class="check-row__text">ข้าพเจ้าเข้าใจว่ารหัสเดิมจะใช้เข้าสู่ระบบไม่ได้ทันทีหลังบันทึก</span>
+      </label>
       <div class="form-error" data-code-error>${icon('alert-circle', 15)}<span></span></div>
     </form>`,
     footer: `<button class="btn btn--ghost" type="button" data-modal-close>ยกเลิก</button>
-      <button class="btn btn--primary" type="submit" form="code-edit-form">${icon('save', 15)} บันทึกรหัสใหม่</button>`,
+      <button class="btn btn--primary" type="submit" form="code-edit-form" data-code-submit>${icon('save', 15)} บันทึกรหัสใหม่</button>`,
     onMount(overlay) {
       const form = overlay.querySelector('#code-edit-form');
       const error = overlay.querySelector('[data-code-error]');
+      const currentInput = overlay.querySelector('#code-edit-current');
+      const codeInput = overlay.querySelector('#code-edit-value');
+      const confirmInput = overlay.querySelector('#code-edit-confirm');
+      const ack = overlay.querySelector('#code-edit-ack');
+      const submit = overlay.querySelector('[data-code-submit]');
+      const showError = (message) => {
+        error.querySelector('span').textContent = message;
+        error.classList.add('is-visible');
+      };
+      const clearError = () => error.classList.remove('is-visible');
+      const sync = () => {
+        const value = String(codeInput.value || '').trim().toUpperCase();
+        codeInput.value = value;
+        const ready = value.length >= 3
+          && value !== String(current).toUpperCase()
+          && String(confirmInput.value || '').trim().toUpperCase() === value
+          && Boolean(String(currentInput.value || ''))
+          && ack.checked;
+        submit.disabled = !ready;
+      };
+      [currentInput, codeInput, confirmInput, ack].forEach(el => el.addEventListener('input', () => { clearError(); sync(); }));
+      sync();
       overlay.querySelector('[data-modal-close]')?.addEventListener('click', () => closeModal());
-      form.addEventListener('submit', ev => {
+      form.addEventListener('submit', async ev => {
         ev.preventDefault();
-        const next = new FormData(form).get('code');
-        const result = isTeacher ? setTeacherCode(id, next, session) : setStudentCode(id, next, session);
-        if (!result.ok) {
-          error.querySelector('span').textContent = result.error;
-          error.classList.add('is-visible');
+        clearError();
+        const next = String(codeInput.value || '').trim().toUpperCase();
+        const confirmValue = String(confirmInput.value || '').trim().toUpperCase();
+        if (!next || next.length < 3) { showError('รหัสใหม่ต้องมีอย่างน้อย 3 ตัว'); return; }
+        if (next === String(current).toUpperCase()) { showError('รหัสใหม่ต้องไม่ซ้ำกับรหัสเดิม'); return; }
+        if (next !== confirmValue) { showError('รหัสทั้งสองช่องไม่ตรงกัน'); return; }
+        if (!ack.checked) { showError('กรุณายืนยันว่าคุณเข้าใจผลของการเปลี่ยนรหัส'); return; }
+        const guardPassword = String(currentInput.value || '');
+        if (!guardPassword) { showError('กรุณากรอกรหัสผ่านปัจจุบันของคุณ'); return; }
+        submit.disabled = true;
+        submit.innerHTML = `${icon('refresh', 15)} กำลังบันทึก...`;
+        const verified = await verifyAccountPassword('teacher', session.teacherId, guardPassword);
+        if (!verified.ok) {
+          submit.disabled = false;
+          submit.innerHTML = `${icon('save', 15)} บันทึกรหัสใหม่`;
+          showError(verified.error || 'รหัสผ่านปัจจุบันไม่ถูกต้อง');
           return;
         }
+        const previous = String(current || '');
+        const result = isTeacher ? setTeacherCode(id, next, session) : setStudentCode(id, next, session);
+        if (!result.ok) {
+          submit.disabled = false;
+          submit.innerHTML = `${icon('save', 15)} บันทึกรหัสใหม่`;
+          showError(result.error || 'บันทึกรหัสไม่สำเร็จ');
+          return;
+        }
+        const pending = result.pending;
+        await pending;
+        const cloud = await cloudSetCode(isTeacher ? 'teacher' : 'student', id, next, person);
+        if (!cloud.ok) {
+          const rollback = isTeacher ? setTeacherCode(id, previous, session) : setStudentCode(id, previous, session);
+          submit.disabled = false;
+          submit.innerHTML = `${icon('save', 15)} บันทึกรหัสใหม่`;
+          if (!rollback.ok) {
+            showError(`บันทึกขึ้นคลาวด์ไม่สำเร็จ และย้อนรหัสเดิมไม่ได้: ${cloud.error || ''} กรุณาติดต่อผู้ดูแลระบบ`);
+            return;
+          }
+          await rollback.pending;
+          showError(`${cloud.error || 'บันทึกขึ้นคลาวด์ไม่สำเร็จ'} · ระบบคืนรหัสเดิมแล้ว กรุณาลองใหม่`);
+          return;
+        }
+        if (person) person.code = next;
         closeModal();
         refreshRoute();
-        toast(isTeacher ? 'แก้ไขรหัสครูแล้ว' : 'แก้ไขรหัสนักเรียนแล้ว', 'success');
+        toast(`เปลี่ยนรหัส${isTeacher ? 'ครู' : 'นักเรียน'}เป็น ${next} แล้ว · รหัสเดิมใช้ไม่ได้แล้ว`, 'success', 4600);
       });
     }
   });
@@ -2624,8 +2731,15 @@ function openStaffDetailModal(teacherId, session) {
         </div>
       </div>
       ${isSelf ? `<form class="profile-password-form" data-staff-password-form hidden>
-        <div class="field"><label for="staff-new-password">รหัสผ่านใหม่</label><input class="input" id="staff-new-password" name="password" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="อย่างน้อย 4 ตัวอักษร" required></div>
-        <div class="field"><label for="staff-confirm-password">ยืนยันรหัสผ่านใหม่</label><input class="input" id="staff-confirm-password" name="confirm" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="พิมพ์อีกครั้ง" required></div>
+        <div class="field"><label for="staff-current-password">รหัสผ่านปัจจุบัน</label><input class="input" id="staff-current-password" name="current" type="password" maxlength="64" autocomplete="current-password" placeholder="ยืนยันรหัสผ่านเดิมก่อนเปลี่ยน" required></div>
+        <div class="field"><label for="staff-new-password">รหัสผ่านใหม่</label><input class="input" id="staff-new-password" name="password" type="password" minlength="8" maxlength="64" autocomplete="new-password" placeholder="อย่างน้อย 8 ตัว มีตัวอักษรและตัวเลข" required>
+          <span class="field__hint">${icon('shield-check', 11)} อย่างน้อย 8 ตัว · ต้องมีทั้งตัวอักษรและตัวเลข · ห้ามใช้รหัสเดิม</span>
+          <div class="password-meter" data-password-meter hidden>
+            <div class="password-meter__bar"><span data-password-meter-bar style="width:0%"></span></div>
+            <div class="password-meter__row"><span data-password-meter-label>ความปลอดภัยของรหัสผ่าน</span></div>
+          </div>
+        </div>
+        <div class="field"><label for="staff-confirm-password">ยืนยันรหัสผ่านใหม่</label><input class="input" id="staff-confirm-password" name="confirm" type="password" minlength="8" maxlength="64" autocomplete="new-password" placeholder="พิมพ์อีกครั้ง" required></div>
         <div class="profile-password-form__actions"><button class="btn btn--ghost btn--sm" type="button" data-staff-cancel-password>ยกเลิก</button><button class="btn btn--primary btn--sm" type="submit">${icon('save', 13)} บันทึกรหัสใหม่</button></div>
       </form>` : ''}`
     : '';
@@ -2639,7 +2753,7 @@ function openStaffDetailModal(teacherId, session) {
         <div><strong>${e(teacher.name)}</strong><span>${e(roleLabel)} · ${e(org?.name || teacher.school || 'ไม่ระบุหน่วยงาน')}</span></div>
       </div>
       <div class="account-profile__details">
-        <div class="profile-detail"><span>รหัสครู</span><strong class="profile-code">${e(teacher.code)} <button class="icon-btn" type="button" data-copy="${e(teacher.code)}" aria-label="คัดลอกรหัส" title="คัดลอกรหัส">${icon('copy', 12)}</button>${canEditCode ? `<button class="icon-btn" type="button" data-edit-teacher-code aria-label="แก้ไขรหัสครู" title="แก้ไขรหัสครู">${icon('edit', 12)}</button>` : ''}</strong></div>
+        <div class="profile-detail"><span>รหัสเข้าสู่ระบบ (รหัสครู)</span><strong class="profile-code">${e(teacher.code)} <button class="icon-btn" type="button" data-copy="${e(teacher.code)}" aria-label="คัดลอกรหัส" title="คัดลอกรหัส">${icon('copy', 12)}</button>${canEditCode ? `<button class="icon-btn" type="button" data-edit-teacher-code aria-label="แก้ไขรหัสครู" title="แก้ไขรหัสครู">${icon('edit', 12)}</button>` : ''}</strong></div>
         <div class="profile-detail"><span>หน่วยงาน / โรงเรียน</span><strong>${e(org?.name || teacher.school || 'ไม่ระบุ')}</strong></div>
         <div class="profile-detail"><span>บทบาท</span><strong>${e(roleLabel)}</strong></div>
         <div class="profile-detail"><span>ชื่อย่อหน่วยงาน</span><strong>${e(org?.shortName || '—')}</strong></div>
@@ -2712,7 +2826,7 @@ function openStaffDetailModal(teacherId, session) {
       });
       overlay.querySelector('[data-edit-teacher-code]')?.addEventListener('click', () => {
         closeModal();
-        setTimeout(() => openCodeEditModal({ kind: 'teacher', id: teacher.id, title: 'แก้ไขรหัสครู', current: teacher.code, session }), 20);
+        setTimeout(() => openCodeEditModal({ kind: 'teacher', id: teacher.id, title: 'แก้ไขรหัสครู', current: teacher.code, session, person: teacher }), 20);
       });
       const passwordForm = overlay.querySelector('[data-staff-password-form]');
       overlay.querySelector('[data-staff-open-password]')?.addEventListener('click', () => {
@@ -2723,37 +2837,66 @@ function openStaffDetailModal(teacherId, session) {
         passwordForm?.setAttribute('hidden', '');
         passwordForm?.reset();
       });
+      const staffNewPassword = overlay.querySelector('#staff-new-password');
+      const staffMeter = overlay.querySelector('[data-password-meter]');
+      const staffMeterBar = overlay.querySelector('[data-password-meter-bar]');
+      const staffMeterLabel = overlay.querySelector('[data-password-meter-label]');
+      staffNewPassword?.addEventListener('input', () => {
+        const value = staffNewPassword.value;
+        if (!staffMeter || !staffMeterBar || !staffMeterLabel) return;
+        if (!value) { staffMeter.hidden = true; return; }
+        const info = passwordStrength(value);
+        staffMeter.hidden = false;
+        staffMeterBar.style.width = `${info.score}%`;
+        staffMeterBar.dataset.level = info.level;
+        staffMeterLabel.textContent = `ความปลอดภัย: ${info.label}`;
+        staffMeterLabel.dataset.level = info.level;
+      });
       passwordForm?.addEventListener('submit', async ev => {
         ev.preventDefault();
         const data = new FormData(passwordForm);
         const next = String(data.get('password') || '');
         if (next !== String(data.get('confirm') || '')) { toast('รหัสผ่านทั้งสองช่องไม่ตรงกัน', 'error'); return; }
+        const current = String(data.get('current') || '');
+        if (!current) { toast('กรุณากรอกรหัสผ่านปัจจุบัน', 'error'); return; }
+        const verified = await verifyAccountPassword('teacher', teacher.id, current);
+        if (!verified.ok) { toast(verified.error || 'รหัสผ่านปัจจุบันไม่ถูกต้อง', 'error', 5000); return; }
+        const issue = passwordIssue(next);
+        if (issue) { toast(issue, 'error', 5000); return; }
+        if (next === String(teacher.password || '')) { toast('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสเดิม', 'error'); return; }
         const previous = teacher.password;
-        const result = setTeacherPassword(teacher.id, next, session);
-        if (!result.ok) { toast(result.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ', 'error'); return; }
-        teacher.password = next;
         const submit = passwordForm.querySelector('button[type=submit]');
-        if (submit) submit.disabled = true;
+        if (submit) { submit.disabled = true; submit.dataset.originalText = submit.innerHTML; submit.innerHTML = `${icon('refresh', 13)} กำลังบันทึก...`; }
         const cloud = await cloudSetPassword('teacher', teacher.id, next);
-        if (submit) submit.disabled = false;
         if (!cloud.ok) {
-          setTeacherPassword(teacher.id, previous, session);
-          teacher.password = previous;
+          if (submit) { submit.disabled = false; submit.innerHTML = submit.dataset.originalText || 'บันทึกรหัสใหม่'; }
           toast(cloud.error || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ กรุณาลองใหม่', 'error', 6000);
           return;
         }
+        const result = setTeacherPassword(teacher.id, next, session);
+        if (!result.ok) {
+          await cloudSetPassword('teacher', teacher.id, previous);
+          if (submit) { submit.disabled = false; submit.innerHTML = submit.dataset.originalText || 'บันทึกรหัสใหม่'; }
+          toast(result.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ', 'error', 5000);
+          return;
+        }
+        teacher.password = next;
+        if (submit) { submit.disabled = false; submit.innerHTML = submit.dataset.originalText || 'บันทึกรหัสใหม่'; }
         if (secret) secret.textContent = maskStaffPassword(next);
         visible = false;
         if (reveal) reveal.innerHTML = icon('eye', 15);
         passwordForm.setAttribute('hidden', '');
         passwordForm.reset();
-        toast('เปลี่ยนรหัสผ่านแล้ว', 'success');
+        if (staffMeter) staffMeter.hidden = true;
+        passwordForm.querySelectorAll('input[type="text"]').forEach(input => { input.type = 'password'; });
+        toast('เปลี่ยนรหัสผ่านแล้ว · ใช้รหัสใหม่ในการเข้าสู่ระบบครั้งถัดไป', 'success', 4200);
       });
-      overlay.querySelector('[data-staff-role-form]')?.addEventListener('submit', ev => {
+      overlay.querySelector('[data-staff-role-form]')?.addEventListener('submit', async ev => {
         ev.preventDefault();
         const role = new FormData(ev.currentTarget).get('staffRole');
         const result = setTeacherRole(teacher.id, role, session);
         if (!result.ok) { toast(result.error || 'เปลี่ยนตำแหน่งไม่สำเร็จ', 'error'); return; }
+        await result.pending;
         closeModal();
         toast(`เปลี่ยนตำแหน่งของ ${teacher.name} เป็น ${role === 'owner' ? 'ผู้สร้างระบบ' : role === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน'} แล้ว`, 'success');
         refreshRoute();
@@ -3195,7 +3338,7 @@ export function teacherStudentView(ctx) {
       document.querySelector('[data-move-student-org]')?.addEventListener('click', () => openMoveStudentOrgModal(student, session));
       document.querySelector('[data-edit-student-code]')?.addEventListener('click', () => openCodeEditModal({
         kind: 'student', id: student.id, title: 'แก้ไขรหัสนักเรียน',
-        current: student.code, session
+        current: student.code, session, person: student
       }));
       document.querySelector('[data-open-student-account]')?.addEventListener('click', () => {
         openAccountProfile({ kind: 'student', personId: student.id, session, title: 'ข้อมูลบัญชีนักเรียน' });

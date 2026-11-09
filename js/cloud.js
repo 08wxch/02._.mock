@@ -202,6 +202,10 @@ export function isCloudReady() {
   return ready;
 }
 
+export function hasCloudSession() {
+  return Boolean(ready && current);
+}
+
 export async function cloudRestore() {
   if (!isCloudEnabled()) return null;
   const supa = getClient();
@@ -471,13 +475,38 @@ async function persistSnapshot(state, attempts, cleanup = null) {
     if (error) throw error;
     lastStateCounts = incoming;
     lastStateMeta = state.meta || {};
+    // Upsert credentials per row. A single bulk upsert fails as a whole when one
+    // row contains a duplicate owner id, which silently kept every teacher's
+    // password out of sync with the value shown in the app.
+    const seenKeys = new Set();
     const credentialRows = [
       ...(state.teachers || []).filter(t => t.password && !t.deletedAt).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
       ...(state.students || []).filter(s => s.password && !s.deletedAt).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
-    ];
-    if (credentialRows.length) {
-      const { error: credError } = await supa.from('credentials').upsert(credentialRows);
-      if (credError) throw credError;
+    ].filter(row => {
+      const key = `${row.owner_type}:${row.owner_id}`;
+      if (!row.owner_id || seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
+    const staleCredentials = [];
+    for (const row of credentialRows) {
+      const key = `${row.owner_type}:${row.owner_id}`;
+      // Do not rewrite a password that was changed from another app (for
+      // example 02._.admin) after this tab loaded. Only push values that differ
+      // from what we last read/wrote.
+      if (lastCredentials.get(key) === row.password) continue;
+      const { error: credError } = await supa.from('credentials').upsert(row, { onConflict: 'owner_type,owner_id' });
+      if (credError) {
+        staleCredentials.push(row.owner_id);
+        console.error('Credential sync failed', row.owner_type, row.owner_id, credError.message);
+        continue;
+      }
+      lastCredentials.set(key, row.password);
+    }
+    if (staleCredentials.length) {
+      window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+        detail: { message: `ซิงก์รหัสผ่านขึ้นคลาวด์ไม่ครบ ${staleCredentials.length} บัญชี · รหัสที่แสดงอาจไม่ตรงกับรหัสที่ใช้เข้าสู่ระบบ` }
+      }));
     }
 
     const changedPeople = peopleFromDB(state).filter(({ person, role }) => {
@@ -561,13 +590,39 @@ export async function cloudDeleteQuestionImage(path) {
   }
 }
 
+export async function cloudSetCode(role, id, code, person = null) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  const next = String(code || '').trim().toUpperCase();
+  if (next.length < 3) return { ok: false, error: 'รหัสใหม่สั้นเกินไป' };
+  try {
+    const body = await callAccounts({ action: 'code', role, id, code: next });
+    return body.ok === false ? { ok: false, error: body.error } : { ok: true };
+  } catch (err) {
+    const message = String(err?.message || '');
+    // Older deployed edge functions do not have the dedicated "code" action.
+    // Fall back to the existing "sync" action so changing a code still updates
+    // profiles.login_code and does not leave the admin panel on the old code.
+    if (person && /unknown action|not found|404/i.test(message)) {
+      try {
+        await syncAccounts([{ person: { ...person, code: next, password: '' }, role }]);
+        return { ok: true, fallback: true };
+      } catch (syncError) {
+        return { ok: false, error: syncError?.message || 'อัปเดตรหัสบนคลาวด์ไม่สำเร็จ' };
+      }
+    }
+    return { ok: false, error: message || 'อัปเดตรหัสบนคลาวด์ไม่สำเร็จ' };
+  }
+}
+
 export async function cloudSetPassword(role, id, password) {
   if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
   const next = String(password || '');
   if (next.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
   try {
     const body = await callAccounts({ action: 'password', role, id, password: next });
-    return body.ok === false ? { ok: false, error: body.error } : { ok: true };
+    if (body.ok === false) return { ok: false, error: body.error };
+    lastCredentials.set(`${role}:${id}`, next);
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err?.message || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ' };
   }
@@ -590,6 +645,26 @@ export function cloudSave(db) {
     saveCount -= 1;
   });
   return saveQueue;
+}
+
+export async function cloudSyncCredentials(state = null) {
+  if (!ready || !current || current.role !== 'teacher' || !state) return { ok: true, synced: 0 };
+  const supa = getClient();
+  const rows = [
+    ...(state.teachers || []).filter(t => t.password && !t.deletedAt).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
+    ...(state.students || []).filter(s => s.password && !s.deletedAt).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
+  ];
+  let synced = 0;
+  const failed = [];
+  for (const row of rows) {
+    const key = `${row.owner_type}:${row.owner_id}`;
+    if (!row.owner_id || lastCredentials.get(key) === row.password) continue;
+    const { error } = await supa.from('credentials').upsert(row, { onConflict: 'owner_type,owner_id' });
+    if (error) { failed.push(row.owner_id); continue; }
+    lastCredentials.set(key, row.password);
+    synced += 1;
+  }
+  return { ok: failed.length === 0, synced, failed };
 }
 
 export async function cloudRefresh() {

@@ -1805,8 +1805,7 @@ export function setTeacherPassword(teacherId, nextPassword, actor = null) {
   const password = String(nextPassword || '');
   if (password.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
   teacher.password = password;
-  saveDB();
-  return { ok: true, teacher };
+  return { ok: true, teacher, pending: saveDB() };
 }
 
 export function setTeacherRole(teacherId, nextRole, actor = null) {
@@ -1817,8 +1816,7 @@ export function setTeacherRole(teacherId, nextRole, actor = null) {
   const role = nextRole === 'manager' ? 'manager' : 'teacher';
   teacher.staffRole = role;
   teacher.roleLabel = nextRole === 'owner' && teacher.isOwner ? 'ผู้สร้างระบบ' : role === 'manager' ? 'ผู้จัดการ' : 'ครูผู้สอน';
-  saveDB();
-  return { ok: true, teacher };
+  return { ok: true, teacher, pending: saveDB() };
 }
 
 export function setTeacherCode(teacherId, nextCode, actor = null) {
@@ -1841,8 +1839,7 @@ export function setTeacherCode(teacherId, nextCode, actor = null) {
   if (saved?.role === 'teacher' && saved.teacherId === teacher.id) {
     setSession({ ...saved, teacherCode: code });
   }
-  saveDB();
-  return { ok: true, teacher };
+  return { ok: true, teacher, pending: saveDB() };
 }
 
 export function setStudentCode(studentId, nextCode, actor = null) {
@@ -1863,8 +1860,7 @@ export function setStudentCode(studentId, nextCode, actor = null) {
   db.attempts.forEach(a => {
     if (a.studentId === student.id) a.studentCode = code;
   });
-  saveDB();
-  return { ok: true, student };
+  return { ok: true, student, pending: saveDB() };
 }
 
 export function setStudentPassword(studentId, nextPassword, actor = null) {
@@ -1881,8 +1877,7 @@ export function setStudentPassword(studentId, nextPassword, actor = null) {
   const password = String(nextPassword || '');
   if (password.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
   student.password = password;
-  saveDB();
-  return { ok: true, student };
+  return { ok: true, student, pending: saveDB() };
 }
 
 export function updateStudentOrg(studentId, nextOrgId, actor = null) {
