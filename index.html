@@ -24,6 +24,28 @@
   <script src="./assets/vendor/supabase.js"></script>
   <script type="module" src="./js/app.js?v=20261111c"></script>
   <script>
+    (function () {
+      function showBootError(message) {
+        var app = document.getElementById('app');
+        if (!app || !document.querySelector('.page-loader')) return;
+        var box = document.getElementById('boot-error');
+        if (!box) {
+          box = document.createElement('pre');
+          box.id = 'boot-error';
+          box.style.cssText = 'position:relative;z-index:5;margin:24px auto;max-width:760px;padding:16px;border-radius:10px;background:#fff3f0;color:#9b2c1f;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;text-align:left;overflow:auto';
+          app.appendChild(box);
+        }
+        box.textContent += message + '\n';
+      }
+      window.addEventListener('error', function (event) {
+        showBootError('JS error: ' + (event.message || 'unknown') + (event.filename ? '\n' + event.filename + ':' + event.lineno : ''));
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        showBootError('Promise error: ' + (event.reason && (event.reason.stack || event.reason.message) || event.reason || 'unknown'));
+      });
+    })();
+  </script>
+  <script>
     setTimeout(function () {
       var loader = document.querySelector('.page-loader');
       if (!loader) return;
