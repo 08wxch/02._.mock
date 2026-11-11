@@ -20,15 +20,19 @@ let lastLocalSaveAt = 0;
 
 function getClient() {
   if (!client && typeof window !== 'undefined' && window.supabase?.createClient) {
+    // Remove the old cross-tab token. New sessions live in sessionStorage.
+    try { localStorage.removeItem('examio_cloud_auth_v1'); } catch {}
     client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
         storageKey: 'examio_cloud_auth_v1',
+        // Every tab gets its own session. This prevents a stale tab from
+        // writing over another tab's data and removes the shared auth lock.
+        storage: window.sessionStorage,
         // A shared auth lock can block every new tab when the original tab
-        // stays open. This app uses short-lived page-local sessions, so a
-        // no-op lock is safer than an orphaned navigator lock here.
+        // stays open. A no-op lock is safer for page-local sessions.
         lock: null,
         lockAcquireTimeout: 3000
       }
