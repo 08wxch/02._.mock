@@ -19,20 +19,41 @@ const app = document.getElementById('app');
 let currentCleanup = null;
 let isRendering = false;
 
-// Restore the Supabase session before the first render. A stale local session
-// must not send the user into a workspace that the database will reject.
+// Restore the Supabase session in the background. The first paint must never
+// wait for Supabase: on Safari a slow auth lock used to leave the spinner up
+// forever. The login/local view renders immediately and is refreshed if the
+// cloud session comes back.
 let cloudBootError = null;
-try {
-  const restored = await cloudRestore();
-  if (restored) {
-    setSession(restored.session);
-    replaceDB(mergeLocalNoticeReads(restored.db));
-  } else if (isCloudEnabled()) {
-    clearSession();
+async function restoreCloudSession() {
+  try {
+    const boot = await Promise.race([
+      cloudRestore().then(value => ({ value })).catch(err => ({ error: err })),
+      new Promise(resolve => setTimeout(() => resolve({ timedOut: true }), 5000))
+    ]);
+    if (boot?.timedOut) {
+      cloudBootError = new Error('เชื่อมต่อฐานข้อมูลกลางช้าเกินไป');
+      return false;
+    }
+    if (boot?.error) throw boot.error;
+    if (boot?.value) {
+      setSession(boot.value.session);
+      replaceDB(mergeLocalNoticeReads(boot.value.db));
+      return true;
+    }
+    if (isCloudEnabled()) {
+      // A session that the cloud no longer recognises must not keep the app
+      // on a stale workspace.
+      if (getSession()) {
+        clearSession();
+        navigate('/login', { replace: true });
+      }
+    }
+    return false;
+  } catch (err) {
+    cloudBootError = err;
+    console.error('Cloud restore failed', err);
+    return false;
   }
-} catch (err) {
-  cloudBootError = err;
-  console.error('Cloud restore failed', err);
 }
 
 function setTitle(title) {
@@ -281,6 +302,12 @@ setInterval(refreshFromCloud, 5000);
 loadDB();
 sweepExpiredAttempts();
 renderRoute();
-if (cloudBootError) {
-  toast('เชื่อมต่อฐานข้อมูลกลางไม่ได้ — กำลังใช้ข้อมูลสำรองในเครื่อง', 'warning', 6000);
-}
+restoreCloudSession().then((restored) => {
+  if (restored) {
+    sweepExpiredAttempts();
+    renderRoute({ scroll: false });
+  }
+  if (cloudBootError) {
+    toast('เชื่อมต่อฐานข้อมูลกลางช้า/ไม่ได้ — กำลังใช้ข้อมูลในเครื่องก่อน', 'warning', 6000);
+  }
+});
