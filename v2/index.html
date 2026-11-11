@@ -22,12 +22,7 @@
   <div id="modal-root"></div>
   <noscript><div style="padding:40px;text-align:center;font-family:sans-serif">เว็บไซต์นี้ต้องเปิดใช้งาน JavaScript</div></noscript>
   <script src="./assets/vendor/supabase.js"></script>
-  <script type="module">
-    import('./js/app.js?v=20261111c').catch(function (err) {
-      var app = document.getElementById('app');
-      if (app) app.innerHTML = '<pre style="padding:24px;white-space:pre-wrap;color:#9b2c1f;font:12px/1.6 monospace">' + String(err && (err.stack || err.message) || err) + '</pre>';
-    });
-  </script>
+  <script src="./app-bundle.js?v=20261111d"></script>
   <script>
     (function () {
       function showBootError(message) {
