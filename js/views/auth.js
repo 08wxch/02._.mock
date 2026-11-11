@@ -149,7 +149,9 @@ export function authView(ctx) {
         html: '<div class="page-loader"><span class="spinner"></span></div>',
         mount() {
           setTimeout(() => {
-            if (window.location.hash.startsWith('#/login')) navigate(target, { replace: true });
+            // A new tab often opens at `/` without a hash. Do not leave the
+            // spinner up just because the URL is not exactly `#/login`.
+            if (!window.location.hash || window.location.hash.startsWith('#/login')) navigate(target, { replace: true });
           }, 0);
         }
       };
