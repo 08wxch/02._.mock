@@ -1,0 +1,746 @@
+// Supabase cloud adapter for 02._.mock.
+// The anon key is public by design; all access is guarded by RLS.
+const SUPABASE_URL = 'https://hqpbvxmrolxhuexzzxgo.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhxcGJ2eG1yb2x4aHVleHp6eGdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3Nzc0NjMsImV4cCI6MjEwODM1MzQ2M30.HsBV5_KXdWadINtL17tIIgiHLbi28t_nU6jsJ1qoDD8';
+const ACCOUNTS_URL = `${SUPABASE_URL}/functions/v1/accounts`;
+
+let client = null;
+let current = null;
+let ready = false;
+let lastStamp = '';
+let lastAttempts = new Map();
+let lastCredentials = new Map();
+const credentialDirty = new Set();
+let lastStateCounts = { students: 0, exams: 0 };
+let lastStateMeta = {};
+let lastPeople = new Map();
+let saveQueue = Promise.resolve();
+let saveCount = 0;
+let lastLocalSaveAt = 0;
+
+function getClient() {
+  if (!client && typeof window !== 'undefined' && window.supabase?.createClient) {
+    client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storageKey: 'examio_cloud_auth_v1'
+      }
+    });
+  }
+  if (!client) throw new Error('ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้');
+  return client;
+}
+
+
+function countsOf(db) {
+  return {
+    students: Array.isArray(db?.students) ? db.students.length : 0,
+    exams: Array.isArray(db?.exams) ? db.exams.length : 0
+  };
+}
+
+// A partial local snapshot (for example after a failed refresh or a newly
+// created org) must never be allowed to erase the central roster/exams.
+function isDangerousShrink(next, previous) {
+  if (!previous) return false;
+  if (previous.students >= 10 && next.students < Math.max(5, Math.floor(previous.students * 0.5))) return true;
+  if (previous.exams >= 3 && next.exams < Math.max(2, Math.floor(previous.exams * 0.5))) return true;
+  return false;
+}
+
+function classIdsOf(student) {
+  if (!student) return [];
+  if (Array.isArray(student.classIds) && student.classIds.length) {
+    return [...new Set(student.classIds.filter(Boolean))];
+  }
+  return student.classId ? [student.classId] : [];
+}
+
+function classLabel(student, db) {
+  const codes = classIdsOf(student)
+    .map(id => (db.classes || []).find(cls => cls.id === id)?.code)
+    .filter(Boolean);
+  return codes.join(', ') || student?.class || 'ไม่ระบุ class';
+}
+
+function toLocalSession(profile, db) {
+  if (!profile) return null;
+  if (profile.role === 'teacher') {
+    const teacher = (db.teachers || []).find(t => t.id === profile.teacher_id && !t.deletedAt);
+    if (!teacher) return null;
+    const org = (db.organizations || []).find(o => o.id === (profile.org_id || teacher.orgId));
+    return {
+      role: 'teacher',
+      teacherId: teacher.id,
+      name: profile.display_name || teacher.name,
+      teacherCode: profile.login_code || teacher.code,
+      school: teacher.school || org?.name || '',
+      orgId: profile.org_id || teacher.orgId,
+      staffRole: teacher.staffRole,
+      loginMethod: 'account'
+    };
+  }
+  const student = (db.students || []).find(s => s.id === profile.student_id && !s.deletedAt);
+  if (!student) return null;
+  return {
+    role: 'student',
+    studentId: student.id,
+    name: profile.display_name || student.name,
+    studentCode: profile.login_code || student.code,
+    class: classLabel(student, db),
+    orgId: profile.org_id || student.orgId,
+    loginMethod: profile.guest ? 'code' : 'account'
+  };
+}
+
+
+function personSignature(person, role) {
+  return [role, person.id, person.code || '', person.name || '', person.orgId || '', person.password || ''].join('|');
+}
+
+function peopleFromDB(db) {
+  return [
+    ...(db.teachers || []).filter(p => !p.deletedAt).map(person => ({ person, role: 'teacher' })),
+    ...(db.students || []).filter(p => !p.deletedAt).map(person => ({ person, role: 'student' }))
+  ];
+}
+
+async function callAccounts(payload) {
+  const supa = getClient();
+  const { data: { session } } = await supa.auth.getSession();
+  if (!session?.access_token) throw new Error('ไม่พบ session สำหรับจัดการบัญชี');
+  const response = await fetch(ACCOUNTS_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || 'จัดการบัญชีเข้าสู่ระบบไม่สำเร็จ');
+  return body;
+}
+
+async function syncAccounts(people) {
+  if (!people.length) return;
+  const body = await callAccounts({
+    action: 'sync',
+    people: people.map(({ person, role }) => ({
+      role,
+      id: person.id,
+      code: person.code,
+      name: person.name,
+      orgId: person.orgId,
+      password: person.password
+    }))
+  });
+  const failed = (body.results || []).filter(r => !r.ok);
+  if (failed.length) throw new Error(failed[0].error || 'สร้างบัญชีเข้าสู่ระบบไม่สำเร็จ');
+}
+
+function rememberPeople(db) {
+  lastPeople = new Map(peopleFromDB(db).map(({ person, role }) => [`${role}:${person.id}`, personSignature(person, role)]));
+}
+
+async function loadCloudDB() {
+  const supa = getClient();
+  const [stateResult, attemptsResult] = await Promise.all([
+    supa.from('app_state').select('data,updated_at').eq('id', 'main').maybeSingle(),
+    supa.from('attempts').select('data').order('updated_at', { ascending: true })
+  ]);
+  if (stateResult.error) throw stateResult.error;
+  if (attemptsResult.error) throw attemptsResult.error;
+  if (!stateResult.data?.data) throw new Error('ยังไม่พบข้อมูลในฐานข้อมูลกลาง');
+
+  const db = stateResult.data.data;
+  db.attempts = (attemptsResult.data || []).map(row => row.data).filter(Boolean);
+  lastAttempts = new Map(db.attempts.map(a => [a.id, JSON.stringify(a)]));
+  lastStamp = stateResult.data.updated_at || '';
+  lastStateCounts = countsOf(db);
+  lastStateMeta = db.meta || {};
+
+  if (current?.role === 'teacher') {
+    const credResult = await supa.from('credentials').select('owner_type,owner_id,password');
+    if (!credResult.error) {
+      lastCredentials = new Map((credResult.data || []).map(row => [`${row.owner_type}:${row.owner_id}`, row.password]));
+      for (const person of [...(db.teachers || []), ...(db.students || [])]) {
+        person.password = lastCredentials.get(`${person.id.startsWith('teacher_') ? 'teacher' : 'student'}:${person.id}`) || person.password;
+      }
+    }
+  }
+  rememberPeople(db);
+  ready = true;
+  return db;
+}
+
+async function profileFor(userId) {
+  const supa = getClient();
+  const { data, error } = await supa.from('profiles').select('*').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function guestFor(userId) {
+  const supa = getClient();
+  const { data, error } = await supa.from('guest_sessions')
+    .select('student_id,exam_id,org_id,expires_at')
+    .eq('user_id', userId)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export function isCloudEnabled() {
+  return Boolean(window.supabase?.createClient);
+}
+
+export function isCloudReady() {
+  return ready;
+}
+
+export function markCredentialDirty(role, id) {
+  if (role && id) credentialDirty.add(`${role}:${id}`);
+}
+
+export function hasCloudSession() {
+  return Boolean(ready && current);
+}
+
+export async function cloudRestore() {
+  if (!isCloudEnabled()) return null;
+  const supa = getClient();
+  const { data: { session }, error } = await supa.auth.getSession();
+  if (error) throw error;
+  if (!session?.user) return null;
+
+  if (session.user.is_anonymous) {
+    const guest = await guestFor(session.user.id);
+    if (!guest) {
+      await supa.auth.signOut();
+      return null;
+    }
+    const profile = {
+      role: 'student',
+      student_id: guest.student_id,
+      org_id: guest.org_id,
+      display_name: null,
+      login_code: null,
+      guest: true
+    };
+    current = profile;
+    const db = await loadCloudDB();
+    const local = toLocalSession(profile, db);
+    if (!local) {
+      await supa.auth.signOut();
+      return null;
+    }
+    return { session: local, db, guest: true };
+  }
+
+  const profile = await profileFor(session.user.id);
+  if (!profile) {
+    await supa.auth.signOut();
+    return null;
+  }
+  current = profile;
+  const db = await loadCloudDB();
+  const local = toLocalSession(profile, db);
+  if (!local) {
+    await supa.auth.signOut();
+    return null;
+  }
+  return { session: local, db, guest: false };
+}
+
+export async function cloudLogin(identifier, password) {
+  if (!isCloudEnabled()) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  const supa = getClient();
+  const { data: rows, error: lookupError } = await supa.rpc('resolve_login', { p_identifier: identifier });
+  if (lookupError) return { ok: false, error: 'เชื่อมต่อฐานข้อมูลไม่ได้ กรุณาลองใหม่' };
+  if (!Array.isArray(rows) || !rows.length) {
+    return { ok: false, error: 'รหัสหรือชื่อผู้ใช้ไม่ถูกต้อง' };
+  }
+  const account = rows[0];
+  const { data: authData, error: authError } = await supa.auth.signInWithPassword({
+    email: account.email,
+    password
+  });
+  if (authError || !authData?.session) {
+    return { ok: false, error: 'รหัสผ่านไม่ถูกต้อง' };
+  }
+  const profile = await profileFor(authData.session.user.id);
+  if (!profile) {
+    await supa.auth.signOut();
+    return { ok: false, error: 'บัญชีนี้ยังไม่ผูกกับข้อมูลโรงเรียน' };
+  }
+  current = profile;
+  const db = await loadCloudDB();
+  const local = toLocalSession(profile, db);
+  if (!local) {
+    await supa.auth.signOut();
+    return { ok: false, error: 'ไม่พบข้อมูลผู้ใช้นี้ในระบบ' };
+  }
+  return { ok: true, session: local, db };
+}
+
+export async function cloudLookupExam(code) {
+  if (!isCloudEnabled()) return null;
+  try {
+    const supa = getClient();
+    const { data, error } = await supa.rpc('public_exam_by_code', { p_code: String(code || '').trim() });
+    if (error) return null;
+    return data || null;
+  } catch (err) {
+    console.warn('Public exam lookup failed', err);
+    return null;
+  }
+}
+
+export async function cloudGuestLogin(examId, studentId, password = '') {
+  if (!isCloudEnabled()) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  const supa = getClient();
+  let { data: { session } } = await supa.auth.getSession();
+  if (session?.user && !session.user.is_anonymous) {
+    return { ok: false, error: 'บัญชีนี้เข้าสู่ระบบอยู่แล้ว กรุณาออกจากระบบก่อนใช้รหัสเข้าสอบ' };
+  }
+  if (!session?.user) {
+    const { data, error } = await supa.auth.signInAnonymously();
+    if (error || !data?.session) {
+      return { ok: false, error: 'เปิดโหมดผู้เข้าสอบไม่สำเร็จ กรุณาเข้าสู่ระบบด้วยบัญชีนักเรียน' };
+    }
+    session = data.session;
+  }
+  const { error: claimError } = await supa.rpc('claim_guest', {
+    p_exam_id: examId,
+    p_student_id: studentId,
+    p_password: String(password || '')
+  });
+  if (claimError) {
+    const raw = String(claimError.message || '');
+    const friendly = raw.includes('invalid password')
+      ? 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของบัญชีที่เลือก'
+      : raw.includes('exam not open')
+      ? 'ชุดสอบนี้ยังไม่เปิดหรือปิดรับคำตอบแล้ว กรุณาติดต่อครูผู้สอน'
+      : raw.includes('student not assigned')
+        ? 'ชื่อนี้ไม่ได้รับสิทธิ์เข้าสอบชุดนี้ กรุณาติดต่อครูผู้สอน'
+        : raw.includes('student not found')
+          ? 'ไม่พบข้อมูลนักเรียนคนนี้ในระบบ กรุณาติดต่อครูผู้สอน'
+          : raw.includes('exam not found')
+            ? 'ไม่พบชุดสอบนี้ในระบบกลาง กรุณาให้ครูตรวจสอบรหัสอีกครั้ง'
+            : raw || 'ยืนยันสิทธิ์เข้าสอบไม่สำเร็จ กรุณาลองใหม่';
+    return { ok: false, error: friendly };
+  }
+  current = { role: 'student', student_id: studentId, guest: true };
+  const db = await loadCloudDB();
+  const student = (db.students || []).find(s => s.id === studentId);
+  if (!student) return { ok: false, error: 'ไม่พบข้อมูลนักเรียน' };
+  const profile = {
+    role: 'student',
+    student_id: student.id,
+    org_id: student.orgId,
+    display_name: student.name,
+    login_code: student.code,
+    guest: true
+  };
+  current = profile;
+  return {
+    ok: true,
+    session: {
+      role: 'student',
+      studentId: student.id,
+      name: student.name,
+      studentCode: student.code,
+      class: classLabel(student, db),
+      orgId: student.orgId,
+      loginMethod: 'code',
+      examId
+    },
+    db
+  };
+}
+
+function cleanState(db) {
+  const state = { ...db };
+  delete state.attempts;
+  delete state.cleanup;
+  state.teachers = (state.teachers || [])
+    .filter(t => t && t.id && !t.deletedAt)
+    .map(t => {
+      const next = { ...t };
+      delete next.password;
+      return next;
+    });
+  state.students = (state.students || [])
+    .filter(s => s && s.id && !s.deletedAt)
+    .map(s => {
+      const next = { ...s };
+      delete next.password;
+      return next;
+    });
+  return state;
+}
+
+function attemptRow(attempt) {
+  return {
+    id: attempt.id,
+    exam_id: attempt.examId || '',
+    student_id: attempt.studentId || '',
+    org_id: attempt.orgId || '',
+    data: attempt
+  };
+}
+
+function cleanupIsEmpty(cleanup) {
+  return !cleanup || !['accounts', 'exams', 'students', 'images'].some(key => Array.isArray(cleanup[key]) && cleanup[key].length);
+}
+
+async function processCleanup(cleanup) {
+  const result = { accounts: [], exams: [], students: [], images: [] };
+  if (cleanupIsEmpty(cleanup)) return result;
+  const supa = getClient();
+
+  const images = [...new Set((cleanup.images || []).map(String).filter(Boolean))];
+  for (let i = 0; i < images.length; i += 100) {
+    const chunk = images.slice(i, i + 100);
+    const { error } = await supa.storage.from(QUESTION_IMAGE_BUCKET).remove(chunk);
+    if (error) console.warn('Could not remove question images', error);
+    else result.images.push(...chunk);
+  }
+
+  const examIds = [...new Set((cleanup.exams || []).map(String).filter(Boolean))];
+  if (examIds.length) {
+    const { error } = await supa.from('attempts').delete().in('exam_id', examIds);
+    if (error) console.warn('Could not remove exam attempts', error);
+    else result.exams.push(...examIds);
+  }
+
+  const studentIds = [...new Set((cleanup.students || []).map(String).filter(Boolean))];
+  if (studentIds.length) {
+    const { error } = await supa.from('attempts').delete().in('student_id', studentIds);
+    if (error) console.warn('Could not remove student attempts', error);
+    else result.students.push(...studentIds);
+  }
+
+  for (const account of cleanup.accounts || []) {
+    const role = account?.role === 'student' ? 'student' : account?.role === 'teacher' ? 'teacher' : '';
+    const id = String(account?.id || '');
+    if (!role || !id) continue;
+    let done = false;
+    const { error } = await supa.rpc('delete_app_account', { p_role: role, p_person_id: id });
+    if (!error) {
+      done = true;
+    } else {
+      // The RPC is the authoritative cleanup path. If it is not installed yet,
+      // at least remove the credentials row so the account cannot be reused.
+      console.warn('Account cleanup RPC failed', error);
+      const { error: credError } = await supa.from('credentials').delete()
+        .eq('owner_type', role).eq('owner_id', id);
+      if (credError) console.warn('Could not remove credentials', credError);
+      done = !credError;
+    }
+    if (done) result.accounts.push({ role, id });
+  }
+
+  return result;
+}
+
+function clearProcessedCleanup(db, processed) {
+  if (!db?.cleanup || !processed) return;
+  const accounts = new Set((processed.accounts || []).map(item => `${item.role}:${item.id}`));
+  const exams = new Set(processed.exams || []);
+  const students = new Set(processed.students || []);
+  const images = new Set(processed.images || []);
+  if (Array.isArray(db.cleanup.accounts)) {
+    db.cleanup.accounts = db.cleanup.accounts.filter(item => !accounts.has(`${item.role}:${item.id}`));
+  }
+  if (Array.isArray(db.cleanup.exams)) db.cleanup.exams = db.cleanup.exams.filter(id => !exams.has(id));
+  if (Array.isArray(db.cleanup.students)) db.cleanup.students = db.cleanup.students.filter(id => !students.has(id));
+  if (Array.isArray(db.cleanup.images)) db.cleanup.images = db.cleanup.images.filter(path => !images.has(path));
+}
+
+async function persistSnapshot(state, attempts, cleanup = null) {
+  const supa = getClient();
+  const nextMap = new Map(attempts.map(a => [a.id, JSON.stringify(a)]));
+  lastLocalSaveAt = Date.now();
+
+  const cleaned = await processCleanup(cleanup);
+  const hasExplicitCleanup = !cleanupIsEmpty(cleanup);
+
+  if (current?.role === 'teacher') {
+    const incoming = countsOf(state);
+    if (!hasExplicitCleanup && isDangerousShrink(incoming, lastStateCounts)) {
+      throw new Error('ปฏิเสธการบันทึก: ข้อมูลนักเรียนหรือชุดสอบลดลงผิดปกติ');
+    }
+    const { error } = await supa.from('app_state').upsert({ id: 'main', data: cleanState(state) });
+    if (error) throw error;
+    lastStateCounts = incoming;
+    lastStateMeta = state.meta || {};
+    // Upsert credentials per row. A single bulk upsert fails as a whole when one
+    // row contains a duplicate owner id, which silently kept every teacher's
+    // password out of sync with the value shown in the app.
+    const seenKeys = new Set();
+    const credentialRows = [
+      ...(state.teachers || []).filter(t => t.password && !t.deletedAt).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
+      ...(state.students || []).filter(s => s.password && !s.deletedAt).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
+    ].filter(row => {
+      const key = `${row.owner_type}:${row.owner_id}`;
+      if (!row.owner_id || seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
+    const staleCredentials = [];
+    for (const row of credentialRows) {
+      const key = `${row.owner_type}:${row.owner_id}`;
+      // Only push a password this tab actually changed. Saving unrelated data
+      // must never overwrite a newer password set from 02._.admin or login.
+      if (!credentialDirty.has(key)) continue;
+      if (lastCredentials.get(key) === row.password) { credentialDirty.delete(key); continue; }
+      const { error: credError } = await supa.from('credentials').upsert(row, { onConflict: 'owner_type,owner_id' });
+      if (credError) {
+        staleCredentials.push(row.owner_id);
+        console.error('Credential sync failed', row.owner_type, row.owner_id, credError.message);
+        continue;
+      }
+      lastCredentials.set(key, row.password);
+      credentialDirty.delete(key);
+    }
+    if (staleCredentials.length) {
+      window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+        detail: { message: `ซิงก์รหัสผ่านขึ้นคลาวด์ไม่ครบ ${staleCredentials.length} บัญชี · รหัสที่แสดงอาจไม่ตรงกับรหัสที่ใช้เข้าสู่ระบบ` }
+      }));
+    }
+
+    const changedPeople = peopleFromDB(state).filter(({ person, role }) => {
+      const key = `${role}:${person.id}`;
+      return lastPeople.get(key) !== personSignature(person, role);
+    });
+    let accountsOk = true;
+    if (changedPeople.length) {
+      try {
+        await syncAccounts(changedPeople);
+      } catch (err) {
+        accountsOk = false;
+        console.error('Account provisioning failed', err);
+        window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+          detail: { message: err?.message || 'สร้างบัญชีเข้าสู่ระบบไม่สำเร็จ' }
+        }));
+      }
+    }
+    if (accountsOk) rememberPeople(state);
+  }
+
+  const changed = attempts.filter(a => lastAttempts.get(a.id) !== nextMap.get(a.id));
+  if (changed.length) {
+    const { error } = await supa.from('attempts').upsert(changed.map(attemptRow));
+    if (error) throw error;
+  }
+  lastAttempts = nextMap;
+  return { cleanup: cleaned };
+}
+
+export async function cloudGetPassword(role, id) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  try {
+    const body = await callAccounts({ action: 'reveal', role, id });
+    const password = String(body.password || '');
+    if (!password) return { ok: false, error: 'ไม่พบรหัสผ่านของบัญชีนี้' };
+    return { ok: true, password };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'ดูรหัสผ่านไม่สำเร็จ' };
+  }
+}
+
+const QUESTION_IMAGE_BUCKET = 'question-images';
+
+function imageExtension(type) {
+  if (type === 'image/png') return 'png';
+  if (type === 'image/jpeg') return 'jpg';
+  return 'webp';
+}
+
+export async function cloudUploadQuestionImage(blob) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  if (current.role !== 'teacher') return { ok: false, error: 'เฉพาะครูเท่านั้นที่อัปโหลดภาพโจทย์ได้' };
+  if (!blob || !blob.size) return { ok: false, error: 'ไม่พบไฟล์รูปภาพ' };
+  if (blob.size > 5 * 1024 * 1024) return { ok: false, error: 'รูปภาพต้องมีขนาดไม่เกิน 5 MB' };
+  const type = blob.type || 'image/jpeg';
+  const teacherKey = String(current.teacher_id || current.teacherId || 'teacher').replace(/[^A-Za-z0-9_-]/g, '');
+  const path = `questions/${teacherKey}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${imageExtension(type)}`;
+  try {
+    const supa = getClient();
+    const { error } = await supa.storage.from(QUESTION_IMAGE_BUCKET).upload(path, blob, {
+      contentType: type,
+      cacheControl: '31536000',
+      upsert: false
+    });
+    if (error) throw error;
+    const { data } = supa.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(path);
+    return { ok: true, url: data.publicUrl, path };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'อัปโหลดรูปภาพไม่สำเร็จ' };
+  }
+}
+
+export async function cloudDeleteQuestionImage(path) {
+  if (!ready || !current || current.role !== 'teacher' || !path) return;
+  try {
+    const supa = getClient();
+    await supa.storage.from(QUESTION_IMAGE_BUCKET).remove([path]);
+  } catch (err) {
+    console.warn('Could not remove question image', err);
+  }
+}
+
+export async function cloudSetCode(role, id, code, person = null) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  const next = String(code || '').trim().toUpperCase();
+  if (next.length < 3) return { ok: false, error: 'รหัสใหม่สั้นเกินไป' };
+  try {
+    const body = await callAccounts({ action: 'code', role, id, code: next });
+    return body.ok === false ? { ok: false, error: body.error } : { ok: true };
+  } catch (err) {
+    const message = String(err?.message || '');
+    // Older deployed edge functions do not have the dedicated "code" action.
+    // Fall back to the existing "sync" action so changing a code still updates
+    // profiles.login_code and does not leave the admin panel on the old code.
+    if (person && /unknown action|not found|404/i.test(message)) {
+      try {
+        await syncAccounts([{ person: { ...person, code: next, password: '' }, role }]);
+        return { ok: true, fallback: true };
+      } catch (syncError) {
+        return { ok: false, error: syncError?.message || 'อัปเดตรหัสบนคลาวด์ไม่สำเร็จ' };
+      }
+    }
+    return { ok: false, error: message || 'อัปเดตรหัสบนคลาวด์ไม่สำเร็จ' };
+  }
+}
+
+export async function cloudSetPassword(role, id, password) {
+  if (!ready || !current) return { ok: false, error: 'ยังเชื่อมต่อฐานข้อมูลกลางไม่ได้' };
+  const next = String(password || '');
+  if (next.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
+  try {
+    const body = await callAccounts({ action: 'password', role, id, password: next });
+    if (body.ok === false) return { ok: false, error: body.error };
+    lastCredentials.set(`${role}:${id}`, next);
+    credentialDirty.delete(`${role}:${id}`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'อัปเดตรหัสผ่านบนคลาวด์ไม่สำเร็จ' };
+  }
+}
+
+export function cloudSave(db) {
+  if (!ready || !current) return Promise.resolve();
+  saveCount += 1;
+  const state = JSON.parse(JSON.stringify(db));
+  const attempts = JSON.parse(JSON.stringify(db.attempts || []));
+  const cleanup = JSON.parse(JSON.stringify(db.cleanup || {}));
+  saveQueue = saveQueue.then(() => persistSnapshot(state, attempts, cleanup)).then(result => {
+    clearProcessedCleanup(db, result?.cleanup);
+  }).catch(err => {
+    console.error('Cloud save failed', err);
+    window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+      detail: { message: 'บันทึกขึ้นคลาวด์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต' }
+    }));
+  }).finally(() => {
+    saveCount -= 1;
+  });
+  return saveQueue;
+}
+
+export async function cloudRepairTeacherCodes(state = null) {
+  if (!ready || !current || current.role !== 'teacher' || !state) return { ok: true, synced: 0, failed: [] };
+  const failed = [];
+  let synced = 0;
+  for (const teacher of (state.teachers || []).filter(t => !t.deletedAt && t.code)) {
+    try {
+      // The existing "sync" action updates profiles.login_code. Send an empty
+      // password so repairing a code never overwrites the current password.
+      await syncAccounts([{ person: { ...teacher, password: '' }, role: 'teacher' }]);
+      synced += 1;
+    } catch (err) {
+      failed.push(teacher.code);
+      console.error('Teacher code repair failed', teacher.code, err);
+    }
+  }
+  return { ok: failed.length === 0, synced, failed };
+}
+
+export async function cloudSyncCredentials(state = null) {
+  if (!ready || !current || current.role !== 'teacher' || !state) return { ok: true, synced: 0 };
+  const supa = getClient();
+  const rows = [
+    ...(state.teachers || []).filter(t => t.password && !t.deletedAt).map(t => ({ owner_type: 'teacher', owner_id: t.id, password: t.password })),
+    ...(state.students || []).filter(s => s.password && !s.deletedAt).map(s => ({ owner_type: 'student', owner_id: s.id, password: s.password }))
+  ];
+  let synced = 0;
+  const failed = [];
+  for (const row of rows) {
+    const key = `${row.owner_type}:${row.owner_id}`;
+    if (!row.owner_id || !credentialDirty.has(key) || lastCredentials.get(key) === row.password) continue;
+    const { error } = await supa.from('credentials').upsert(row, { onConflict: 'owner_type,owner_id' });
+    if (error) { failed.push(row.owner_id); continue; }
+    lastCredentials.set(key, row.password);
+    credentialDirty.delete(key);
+    synced += 1;
+  }
+  return { ok: failed.length === 0, synced, failed };
+}
+
+export async function cloudRefresh() {
+  if (!ready || !current) return null;
+  if (saveCount > 0) return null;
+  if (Date.now() - lastLocalSaveAt < 1200) return null;
+  const supa = getClient();
+  const [stateResult, attemptsResult] = await Promise.all([
+    supa.from('app_state').select('data,updated_at').eq('id', 'main').maybeSingle(),
+    supa.from('attempts').select('data').order('updated_at', { ascending: true })
+  ]);
+  if (stateResult.error || attemptsResult.error || !stateResult.data?.data) return null;
+
+  const rows = attemptsResult.data || [];
+  const nextMap = new Map(rows.map(row => [row.data?.id, JSON.stringify(row.data)]));
+  const stamp = stateResult.data.updated_at || '';
+  const attemptsChanged = nextMap.size !== lastAttempts.size
+    || [...nextMap.entries()].some(([id, raw]) => lastAttempts.get(id) !== raw);
+
+  if (stamp === lastStamp && !attemptsChanged) return null;
+
+  const db = stateResult.data.data;
+  const incoming = countsOf(db);
+  const remoteCleanup = Boolean(db.meta?.lastCleanupAt && db.meta.lastCleanupAt !== lastStateMeta.lastCleanupAt);
+  if (!remoteCleanup && isDangerousShrink(incoming, lastStateCounts)) {
+    console.warn('Rejected partial cloud snapshot', incoming, lastStateCounts);
+    window.dispatchEvent(new CustomEvent('examio:cloud-error', {
+      detail: { message: 'พบข้อมูลกลางผิดปกติ จึงยังใช้ข้อมูลในเครื่องก่อน' }
+    }));
+    return null;
+  }
+  db.attempts = rows.map(row => row.data).filter(Boolean);
+  lastAttempts = nextMap;
+  lastStamp = stamp;
+  lastStateCounts = incoming;
+  lastStateMeta = db.meta || {};
+  rememberPeople(db);
+  return db;
+}
+
+export async function cloudLogout() {
+  ready = false;
+  current = null;
+  lastStamp = '';
+  lastAttempts = new Map();
+  lastCredentials = new Map();
+  if (!client) return;
+  try {
+    await client.auth.signOut();
+  } catch (err) {
+    console.warn('Cloud sign out failed', err);
+  }
+}
