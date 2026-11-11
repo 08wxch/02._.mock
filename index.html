@@ -12,7 +12,7 @@
   <link rel="preload" href="./assets/fonts/ibm-plex-sans-thai-400-thai.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="./assets/fonts/ibm-plex-sans-thai-600-thai.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./assets/vendor/katex/katex.min.css">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261112c">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261112d">
 </head>
 <body>
   <div id="app">
@@ -45,15 +45,19 @@
   </script>
 
   <script src="./assets/vendor/supabase.js"></script>
-  <script type="module" src="./js/app.js?v=20261112c"></script>
+  <script type="module" src="./js/app.js?v=20261112d"></script>
   <script>
     setTimeout(function () {
       var loader = document.querySelector('.page-loader');
       if (!loader) return;
       var note = document.createElement('div');
       note.style.cssText = 'margin-top:14px;font:12px/1.6 sans-serif;color:#666;text-align:center';
-      note.innerHTML = 'โหลดนานกว่าปกติ <button type="button" id="boot-reset" style="border:0;background:none;text-decoration:underline;color:inherit;font:inherit;cursor:pointer;padding:0">ล้างข้อมูลเว็บและเริ่มใหม่</button>';
+      note.innerHTML = 'โหลดนานกว่าปกติ <button type="button" id="boot-login" style="border:0;background:none;text-decoration:underline;color:inherit;font:inherit;cursor:pointer;padding:0;margin-right:12px">ไปหน้าเข้าสู่ระบบ</button><button type="button" id="boot-reset" style="border:0;background:none;text-decoration:underline;color:var(--muted-2);font:inherit;cursor:pointer;padding:0">ล้างข้อมูลเว็บ</button>';
       loader.appendChild(note);
+      document.getElementById('boot-login')?.addEventListener('click', function () {
+        try { sessionStorage.setItem('examio_force_login', '1'); } catch (e) {}
+        location.replace(location.pathname + '#/login?force=1');
+      });
       document.getElementById('boot-reset')?.addEventListener('click', function () {
         ['examio_cloud_auth_v1', 'examio_demo_session_v2', 'examio_demo_db_v2'].forEach(function (key) {
           try { localStorage.removeItem(key); } catch (e) {}

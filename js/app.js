@@ -24,6 +24,14 @@ let isRendering = false;
 // forever. The login/local view renders immediately and is refreshed if the
 // cloud session comes back.
 let cloudBootError = null;
+
+function forceLoginPage() {
+  try { sessionStorage.setItem('examio_force_login', '1'); } catch {}
+  const hash = window.location.hash;
+  if (hash.includes('/take') || hash.includes('/review') || hash.includes('/answers')) return;
+  if (!hash.startsWith('#/login')) navigate('/login?force=1', { replace: true });
+}
+
 async function restoreCloudSession() {
   try {
     const boot = await Promise.race([
@@ -32,6 +40,7 @@ async function restoreCloudSession() {
     ]);
     if (boot?.timedOut) {
       cloudBootError = new Error('เชื่อมต่อฐานข้อมูลกลางช้าเกินไป');
+      forceLoginPage();
       return false;
     }
     if (boot?.error) throw boot.error;
@@ -52,6 +61,7 @@ async function restoreCloudSession() {
   } catch (err) {
     cloudBootError = err;
     console.error('Cloud restore failed', err);
+    forceLoginPage();
     return false;
   }
 }

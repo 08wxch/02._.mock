@@ -127,6 +127,7 @@ function teacherPanel() {
 export function authView(ctx) {
   const db = getDB();
   const sharedCode = (ctx.query.get('code') || '').replace(/\D/g, '').slice(0, 6);
+  const forceLogin = ctx.query.get('force') === '1' || sessionStorage.getItem('examio_force_login') === '1';
   const forceFresh = ctx.query.get('fresh') === '1' || Boolean(sharedCode);
   let freshSignOut = Promise.resolve();
   if (forceFresh) {
@@ -136,7 +137,7 @@ export function authView(ctx) {
   // A valid session should never be destroyed just because the login route was
   // opened (for example after an in-app refresh or a browser back action).
   // Shared exam links explicitly request a fresh session with ?fresh=1.
-  if (!forceFresh && session) {
+  if (!forceFresh && !forceLogin && session) {
     const account = session.role === 'teacher'
       ? db.teachers.find(person => person.id === session.teacherId && !person.deletedAt)
       : session.role === 'student'
@@ -154,8 +155,9 @@ export function authView(ctx) {
       };
     }
   }
-  // No usable session (or a shared link asked for a fresh one): start clean.
-  clearSession();
+  // A forced login (new tab that could not restore its cloud session) must
+  // show the form without deleting the original tab's shared session.
+  if (!forceLogin) clearSession();
   if (ctx.query.get('fresh') === '1') {
     const cleanHash = `#/login${sharedCode ? `?code=${sharedCode}` : ''}`;
     try { history.replaceState(null, '', `${window.location.pathname}${window.location.search}${cleanHash}`); } catch (err) { /* URL cleanup is best effort */ }
@@ -483,6 +485,7 @@ export function authView(ctx) {
             }
             setSession(result.session);
             replaceDB(result.db);
+            sessionStorage.removeItem('examio_force_login');
             closeModal();
             toast('ยืนยันตัวตนสำเร็จ อ่านคำชี้แจงก่อนเริ่มสอบ', 'success');
             navigate(`/student/exam/${exam.id}/instructions`);
@@ -526,6 +529,7 @@ export function authView(ctx) {
       }
       setSession(result.session);
       replaceDB(result.db);
+      sessionStorage.removeItem('examio_force_login');
       toast(`ยินดีต้อนรับ ${result.session.name}`, 'success');
       const sharedExam = sharedCode
         ? (result.db.exams || []).find(exam => exam.code === sharedCode && exam.status === 'open')
@@ -560,6 +564,7 @@ export function authView(ctx) {
       page.querySelector('#teacher-identifier').removeAttribute('aria-invalid');
       setSession(result.session);
       replaceDB(result.db);
+      sessionStorage.removeItem('examio_force_login');
       toast(`ยินดีต้อนรับ ${result.session.name}`, 'success');
       navigate('/teacher');
     });
