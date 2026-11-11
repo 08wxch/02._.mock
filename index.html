@@ -12,7 +12,7 @@
   <link rel="preload" href="./assets/fonts/ibm-plex-sans-thai-400-thai.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="./assets/fonts/ibm-plex-sans-thai-600-thai.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./assets/vendor/katex/katex.min.css">
-  <link rel="stylesheet" href="./assets/styles.css">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261111b">
 </head>
 <body>
   <div id="app">
@@ -22,6 +22,16 @@
   <div id="modal-root"></div>
   <noscript><div style="padding:40px;text-align:center;font-family:sans-serif">เว็บไซต์นี้ต้องเปิดใช้งาน JavaScript</div></noscript>
   <script src="./assets/vendor/supabase.js"></script>
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="./js/app.js?v=20261111b"></script>
+  <script>
+    setTimeout(function () {
+      var loader = document.querySelector('.page-loader');
+      if (!loader) return;
+      var note = document.createElement('div');
+      note.style.cssText = 'margin-top:14px;font:12px/1.6 sans-serif;color:#666;text-align:center';
+      note.innerHTML = 'โหลดนานกว่าปกติ <a href="./?fresh=1" style="text-decoration:underline;color:inherit">ลองโหลดใหม่</a>';
+      loader.appendChild(note);
+    }, 10000);
+  </script>
 </body>
 </html>
