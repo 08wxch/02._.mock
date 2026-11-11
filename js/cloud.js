@@ -26,7 +26,10 @@ function getClient() {
         autoRefreshToken: true,
         detectSessionInUrl: false,
         storageKey: 'examio_cloud_auth_v1',
-        // Do not let a stale tab hold the auth lock forever on a new tab.
+        // A shared auth lock can block every new tab when the original tab
+        // stays open. This app uses short-lived page-local sessions, so a
+        // no-op lock is safer than an orphaned navigator lock here.
+        lock: null,
         lockAcquireTimeout: 3000
       }
     });
