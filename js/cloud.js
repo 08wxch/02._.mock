@@ -50,8 +50,10 @@ function countsOf(db) {
 // created org) must never be allowed to erase the central roster/exams.
 function isDangerousShrink(next, previous) {
   if (!previous) return false;
-  if (previous.students >= 10 && next.students < Math.max(5, Math.floor(previous.students * 0.5))) return true;
-  if (previous.exams >= 3 && next.exams < Math.max(2, Math.floor(previous.exams * 0.5))) return true;
+  if (previous.students > 0 && next.students === 0) return true;
+  if (previous.exams > 0 && next.exams === 0) return true;
+  if (previous.students >= 5 && next.students < Math.ceil(previous.students * 0.5)) return true;
+  if (previous.exams >= 3 && next.exams < Math.ceil(previous.exams * 0.5)) return true;
   return false;
 }
 

@@ -257,15 +257,8 @@ window.addEventListener('hashchange', () => {
 window.addEventListener('app:refresh', () => {
   renderRoute({ scroll: false });
 });
-window.addEventListener('storage', (ev) => {
-  if (ev.key !== 'examio_demo_db_v2') return;
-  reloadDB();
-  const hash = window.location.hash;
-  if (!hash.includes('/take')) {
-    sweepExpiredAttempts();
-    refreshRoute();
-  }
-});
+// The database is no longer kept in localStorage. Cloud refresh is the only
+// cross-tab source of truth; do not revive the old browser snapshot.
 
 // Periodic timeout sweep. Exam pages manage their own countdown, while this
 // keeps dashboards and teacher views consistent if a tab is left open.

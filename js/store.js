@@ -1,5 +1,5 @@
 import { normalize, uid, answerIsEmpty } from './utils.js';
-import { cloudSave } from './cloud.js';
+import { cloudSave, markCredentialDirty } from './cloud.js';
 
 export const DB_KEY = 'examio_demo_db_v2';
 export const SESSION_KEY = 'examio_demo_session_v2';
@@ -577,6 +577,21 @@ export function createSeedDB() {
   };
 }
 
+export function createEmptyDB() {
+  return {
+    meta: { version: 8, createdAt: now().toISOString() },
+    organizations: [],
+    teachers: [],
+    teacher: null,
+    classes: [],
+    students: [],
+    exams: [],
+    attempts: [],
+    notices: [],
+    noticeReads: {}
+  };
+}
+
 function safeParse(value) {
   try { return JSON.parse(value); } catch { return null; }
 }
@@ -858,24 +873,15 @@ function migrateDB(db) {
 }
 
 export function reloadDB() {
-  const stored = safeParse(localStorage.getItem(DB_KEY));
-  if (stored) {
-    database = stored;
-    if (migrateDB(database)) persist();
-  }
-  return database;
+  return database || loadDB();
 }
 
 export function loadDB() {
   if (database) return database;
-  const stored = safeParse(localStorage.getItem(DB_KEY));
-  if (stored && Array.isArray(stored.exams)) {
-    database = stored;
-    if (migrateDB(database)) persist();
-    return database;
-  }
-  database = createSeedDB();
-  persist();
+  // The app is cloud-first now. Never fall back to demo seed data and never
+  // read a stale browser snapshot; both were capable of overwriting the
+  // production roster. Data comes from Supabase after authentication.
+  database = createEmptyDB();
   return database;
 }
 
@@ -888,12 +894,9 @@ export function replaceDB(next) {
 }
 
 export function persist() {
-  if (!database) return;
-  try {
-    localStorage.setItem(DB_KEY, JSON.stringify(database));
-  } catch (err) {
-    console.warn('Unable to persist exam data', err);
-  }
+  // Intentionally disabled: the full database must not live in localStorage.
+  // Supabase is the source of truth and has a server-side backup trigger.
+  try { localStorage.removeItem(DB_KEY); } catch {}
 }
 
 export function saveDB() {
@@ -905,27 +908,27 @@ export function saveDB() {
 }
 
 export function resetDB() {
-  database = createSeedDB();
-  persist();
+  database = createEmptyDB();
   sessionStorage.clear();
+  localStorage.removeItem(DB_KEY);
   localStorage.removeItem(SESSION_KEY);
   window.dispatchEvent(new CustomEvent('examio:datachange'));
 }
 
 export function getSession() {
-  return safeParse(localStorage.getItem(SESSION_KEY));
+  return safeParse(sessionStorage.getItem(SESSION_KEY));
 }
 
 export function setSession(session) {
   if (!session) {
-    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
     return;
   }
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, loginAt: session.loginAt || new Date().toISOString() }));
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, loginAt: session.loginAt || new Date().toISOString() }));
 }
 
 export function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 export function findExam(id) {
@@ -1805,6 +1808,7 @@ export function setTeacherPassword(teacherId, nextPassword, actor = null) {
   const password = String(nextPassword || '');
   if (password.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
   teacher.password = password;
+  markCredentialDirty('teacher', teacher.id);
   return { ok: true, teacher, pending: saveDB() };
 }
 
@@ -1877,6 +1881,7 @@ export function setStudentPassword(studentId, nextPassword, actor = null) {
   const password = String(nextPassword || '');
   if (password.length < 4) return { ok: false, error: 'รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร' };
   student.password = password;
+  markCredentialDirty('student', student.id);
   return { ok: true, student, pending: saveDB() };
 }
 
