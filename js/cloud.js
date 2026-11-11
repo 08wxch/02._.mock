@@ -25,7 +25,9 @@ function getClient() {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
-        storageKey: 'examio_cloud_auth_v1'
+        storageKey: 'examio_cloud_auth_v1',
+        // Do not let a stale tab hold the auth lock forever on a new tab.
+        lockAcquireTimeout: 3000
       }
     });
   }

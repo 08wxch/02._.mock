@@ -12,7 +12,7 @@
   <link rel="preload" href="./assets/fonts/ibm-plex-sans-thai-400-thai.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="./assets/fonts/ibm-plex-sans-thai-600-thai.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./assets/vendor/katex/katex.min.css">
-  <link rel="stylesheet" href="./assets/styles.css?v=20261112a">
+  <link rel="stylesheet" href="./assets/styles.css?v=20261112b">
 </head>
 <body>
   <div id="app">
@@ -45,15 +45,22 @@
   </script>
 
   <script src="./assets/vendor/supabase.js"></script>
-  <script type="module" src="./js/app.js?v=20261112a"></script>
+  <script type="module" src="./js/app.js?v=20261112b"></script>
   <script>
     setTimeout(function () {
       var loader = document.querySelector('.page-loader');
       if (!loader) return;
       var note = document.createElement('div');
       note.style.cssText = 'margin-top:14px;font:12px/1.6 sans-serif;color:#666;text-align:center';
-      note.innerHTML = 'โหลดนานกว่าปกติ <a href="./?fresh=1" style="text-decoration:underline;color:inherit">ลองโหลดใหม่</a>';
+      note.innerHTML = 'โหลดนานกว่าปกติ <button type="button" id="boot-reset" style="border:0;background:none;text-decoration:underline;color:inherit;font:inherit;cursor:pointer;padding:0">ล้างข้อมูลเว็บและเริ่มใหม่</button>';
       loader.appendChild(note);
+      document.getElementById('boot-reset')?.addEventListener('click', function () {
+        ['examio_cloud_auth_v1', 'examio_demo_session_v2', 'examio_demo_db_v2'].forEach(function (key) {
+          try { localStorage.removeItem(key); } catch (e) {}
+        });
+        try { sessionStorage.clear(); } catch (e) {}
+        location.replace(location.pathname + '?fresh=' + Date.now());
+      });
     }, 10000);
   </script>
 </body>
