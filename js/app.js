@@ -23,10 +23,20 @@ let isRendering = false;
 // must not send the user into a workspace that the database will reject.
 let cloudBootError = null;
 try {
-  const restored = await cloudRestore();
-  if (restored) {
-    setSession(restored.session);
-    replaceDB(mergeLocalNoticeReads(restored.db));
+  // Never leave the app stuck on the loading spinner when Supabase is slow
+  // or a browser is holding an auth lock. A 5-second timeout falls back to the
+  // local session/login screen; the cloud call may still finish in background.
+  const boot = await Promise.race([
+    cloudRestore().then(value => ({ value })).catch(err => ({ error: err })),
+    new Promise(resolve => setTimeout(() => resolve({ timedOut: true }), 5000))
+  ]);
+  if (boot?.timedOut) {
+    cloudBootError = new Error('เชื่อมต่อฐานข้อมูลกลางช้าเกินไป');
+  } else if (boot?.error) {
+    throw boot.error;
+  } else if (boot?.value) {
+    setSession(boot.value.session);
+    replaceDB(mergeLocalNoticeReads(boot.value.db));
   } else if (isCloudEnabled()) {
     clearSession();
   }
