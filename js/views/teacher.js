@@ -738,7 +738,11 @@ function gradingTab(exam, metrics) {
           </div>
           <div style="text-align:right">
             <span class="grading-entry__auto">ปรนัย ${formatNumber(attemptScore(exam, a).auto, 1)} คะแนน</span>
-            ${manual ? badge('ตรวจแล้ว', 'success', false, 'badge--sm') : badge('รอตรวจ', 'warning', false, 'badge--sm')}
+            ${manual
+              ? (Number(manual.score) > 0
+                ? badge('ถูก', 'success', false, 'badge--sm')
+                : badge('ผิด', 'danger', false, 'badge--sm'))
+              : badge('รอตรวจ', 'warning', false, 'badge--sm')}
           </div>
         </div>
         <div class="student-answer-quote ${value ? '' : 'is-empty'}"><p>${value ? e(value) : 'นักเรียนไม่ได้เขียนคำตอบ'}</p></div>
