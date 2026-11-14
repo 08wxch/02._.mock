@@ -134,8 +134,16 @@ function scopeFor(ctx) {
     .filter(row => row.attempts > 0)
     .sort((a, b) => b.average - a.average || b.attempts - a.attempts);
 
+  const scoreValues = scored.map(row => row.score.percent);
+  const requestedTrendClass = queryValue(ctx, 'trendClass');
+  const trendClassId = classes.some(cls => cls.id === requestedTrendClass) ? requestedTrendClass : 'all';
+  const trendScored = trendClassId === 'all' ? scored : scored.filter(row => {
+    const student = studentById.get(row.attempt.studentId);
+    return student && classIdsOf(student).includes(trendClassId);
+  });
+
   const examEntries = new Map();
-  scored.forEach(row => {
+  trendScored.forEach(row => {
     const entry = examEntries.get(row.exam.id) || { total: 0, count: 0, passed: 0 };
     entry.total += row.score.percent;
     entry.count += 1;
@@ -158,17 +166,47 @@ function scopeFor(ctx) {
     .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
     .slice(-8);
 
-  const distributionBands = [
-    { label: '0–19', min: 0, max: 20, count: 0 },
-    { label: '20–39', min: 20, max: 40, count: 0 },
-    { label: '40–59', min: 40, max: 60, count: 0 },
-    { label: '60–79', min: 60, max: 80, count: 0 },
-    { label: '80–100', min: 80, max: 101, count: 0 }
-  ];
-  scored.forEach(row => {
-    const band = distributionBands.find(item => row.score.percent >= item.min && row.score.percent < item.max);
-    if (band) band.count += 1;
+  // Local comparison filters: pick any two classes without changing the
+  // page-wide organisation/class scope.
+  const classStatIds = classStats.map(row => row.id);
+  const requestedA = queryValue(ctx, 'cmpA');
+  const requestedB = queryValue(ctx, 'cmpB');
+  const cmpAId = classStatIds.includes(requestedA) ? requestedA : (classStatIds[0] || '');
+  const cmpBId = classStatIds.includes(requestedB) && requestedB !== cmpAId ? requestedB : (classStatIds.find(id => id !== cmpAId) || '');
+  const cmpRows = [cmpAId, cmpBId].filter(Boolean).map(id => classStats.find(row => row.id === id)).filter(Boolean);
+
+  // Top-student filters: exam first, then the classes that actually appear in
+  // that exam. "all" means every class in the current organisation scope.
+  const examsWithAttempts = exams.filter(exam => scored.some(row => row.exam.id === exam.id));
+  const requestedTopExam = queryValue(ctx, 'exam');
+  const topExamId = examsWithAttempts.some(exam => exam.id === requestedTopExam) ? requestedTopExam : (examsWithAttempts[0]?.id || '');
+  const topExam = examsWithAttempts.find(exam => exam.id === topExamId) || null;
+  const topExamScored = scored.filter(row => row.exam.id === topExamId);
+  const topClassOptions = classes.filter(cls => topExamScored.some(row => {
+    const student = studentById.get(row.attempt.studentId);
+    return student && classIdsOf(student).includes(cls.id);
+  }));
+  const requestedTopClass = queryValue(ctx, 'examClass');
+  const topClassId = topClassOptions.some(cls => cls.id === requestedTopClass) ? requestedTopClass : 'all';
+  const topPool = topExamScored.filter(row => {
+    if (topClassId === 'all') return true;
+    const student = studentById.get(row.attempt.studentId);
+    return student && classIdsOf(student).includes(topClassId);
   });
+  const bestByStudent = new Map();
+  topPool.forEach(row => {
+    const current = bestByStudent.get(row.attempt.studentId);
+    if (!current || row.score.percent > current.score.percent || (row.score.percent === current.score.percent && row.score.total > current.score.total)) {
+      bestByStudent.set(row.attempt.studentId, row);
+    }
+  });
+  const topRows = [...bestByStudent.values()]
+    .sort((a, b) => b.score.percent - a.score.percent || b.score.total - a.score.total)
+    .slice(0, 5)
+    .map((row, index, list) => {
+      const student = studentById.get(row.attempt.studentId);
+      return { student, row, rank: index + 1, classLabel: student ? studentClassLabel(student, db) : '—' };
+    });
 
   const orgLabel = orgId === 'all' ? 'ทุกหน่วยงาน' : findOrganization(orgId, db)?.name || 'หน่วยงาน';
   const classLabel = classId === 'all' ? 'ทุก class' : classes.find(cls => cls.id === classId)?.code || 'class';
@@ -176,7 +214,9 @@ function scopeFor(ctx) {
   return {
     db, session, owner, me, orgs, orgId, classId, classes, students, exams, attempts, scored,
     average, passRate, passCount: passed, highest,
-    studentRows, topics, classStats, examTrend, distributionBands, orgLabel, classLabel
+    studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel,
+    trendClassId, trendScored, topExamId, topExam, topExamScored, topExamOptions: examsWithAttempts, topClassOptions, topClassId, topRows,
+    classStatIds, cmpAId, cmpBId, cmpRows
   };
 }
 
@@ -290,6 +330,61 @@ function distributionChart(bands) {
   <div class="analytics-chart-caption"><span><i class="analytics-dot analytics-dot--coral"></i> จำนวนครั้งที่ส่ง</span><span>${total} ครั้ง</span></div>`;
 }
 
+function boxPlot(values) {
+  if (!values.length) {
+    return `<div class="analytics-empty analytics-empty--chart">${icon('bar-chart', 22)}<span>ยังไม่มีคะแนนสำหรับดูการกระจาย</span></div>`;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  const quantile = (p) => {
+    const pos = (n - 1) * p;
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  };
+  const min = sorted[0];
+  const max = sorted[n - 1];
+  const q1 = quantile(.25);
+  const median = quantile(.5);
+  const q3 = quantile(.75);
+  const iqr = q3 - q1;
+  const lowFence = q1 - 1.5 * iqr;
+  const highFence = q3 + 1.5 * iqr;
+  const whiskerLow = sorted.find(v => v >= lowFence) ?? min;
+  const whiskerHigh = [...sorted].reverse().find(v => v <= highFence) ?? max;
+  const outliers = sorted.filter(v => v < whiskerLow || v > whiskerHigh);
+  const width = 720;
+  const height = 230;
+  const pad = { top: 18, right: 28, bottom: 34, left: 44 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const cx = pad.left + plotW * .5;
+  const boxW = 138;
+  const yAt = (v) => pad.top + ((100 - Math.max(0, Math.min(100, v))) / 100) * plotH;
+  const grid = [0, 25, 50, 75, 100].map(v => `<line x1="${pad.left}" x2="${width - pad.right}" y1="${yAt(v)}" y2="${yAt(v)}" class="trend-grid-line"></line><text x="${pad.left - 9}" y="${yAt(v) + 3}" text-anchor="end" class="trend-axis-label">${v}</text>`).join('');
+  const dots = sorted.map((v, i) => {
+    const x = cx - 94 + ((i * 37) % 188);
+    return `<circle cx="${x}" cy="${yAt(v)}" r="2.1" class="box-dot"></circle>`;
+  }).join('');
+  const outlierDots = outliers.map((v, i) => `<circle cx="${cx + (i % 2 ? 32 : -32)}" cy="${yAt(v)}" r="3.2" class="box-outlier"></circle>`).join('');
+  const summary = `<div class="box-summary"><span>ต่ำสุด <b>${formatNumber(min, 0)}%</b></span><span>Q1 <b>${formatNumber(q1, 0)}%</b></span><span>มัธยฐาน <b>${formatNumber(median, 0)}%</b></span><span>Q3 <b>${formatNumber(q3, 0)}%</b></span><span>สูงสุด <b>${formatNumber(max, 0)}%</b></span></div>`;
+  return `<div class="analytics-box-wrap">
+    <svg class="analytics-box-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="แผนภาพกล่องคะแนนนักเรียน">
+      ${grid}
+      <line x1="${cx}" x2="${cx}" y1="${yAt(whiskerHigh)}" y2="${yAt(q3)}" class="box-whisker"></line>
+      <line x1="${cx}" x2="${cx}" y1="${yAt(q1)}" y2="${yAt(whiskerLow)}" class="box-whisker"></line>
+      <line x1="${cx - 30}" x2="${cx + 30}" y1="${yAt(whiskerHigh)}" y2="${yAt(whiskerHigh)}" class="box-cap"></line>
+      <line x1="${cx - 30}" x2="${cx + 30}" y1="${yAt(whiskerLow)}" y2="${yAt(whiskerLow)}" class="box-cap"></line>
+      <rect x="${cx - boxW / 2}" y="${yAt(q3)}" width="${boxW}" height="${Math.max(1, yAt(q1) - yAt(q3))}" rx="5" class="box-body"></rect>
+      <line x1="${cx - boxW / 2}" x2="${cx + boxW / 2}" y1="${yAt(median)}" y2="${yAt(median)}" class="box-median"></line>
+      ${dots}
+      ${outlierDots}
+    </svg>
+    ${summary}
+    <div class="analytics-chart-caption"><span><i class="analytics-dot"></i> คะแนน (%)</span><span>${n} ครั้งที่ส่ง · กล่อง = Q1–Q3 · เส้นกลาง = มัธยฐาน</span></div>
+  </div>`;
+}
+
 function classPerformance(classStats) {
   if (!classStats.length) {
     return `<div class="analytics-empty analytics-empty--chart">${icon('school', 22)}<span>ยังไม่มีคะแนนแยกตาม class</span></div>`;
@@ -303,6 +398,16 @@ function classPerformance(classStats) {
   </div>`;
 }
 
+function classCompare(rows) {
+  if (!rows.length) return `<div class="analytics-empty analytics-empty--chart">${icon('school', 22)}<span>ยังไม่มีคะแนนแยกตาม class</span></div>`;
+  return `<div class="class-compare-grid">${rows.map((row, index) => `<div class="class-compare-card">
+    <span class="class-compare-card__tag">class ${index ? 'B' : 'A'}</span>
+    <div class="class-compare-card__top"><strong>${e(row.label)}</strong><b>${row.average}%</b></div>
+    <div class="class-compare-card__bar"><span style="width:${row.average}%"></span></div>
+    <small>${row.students} คน · ${row.attempts} ครั้ง · ผ่าน ${row.passRate}%</small>
+  </div>`).join('')}</div>`;
+}
+
 export function teacherAnalyticsView(ctx) {
   const scope = scopeFor(ctx);
   if (scope.denied) {
@@ -314,9 +419,8 @@ export function teacherAnalyticsView(ctx) {
       mount: () => mountTeacherShell(ctx.session)
     };
   }
-  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, distributionBands, orgLabel, classLabel } = scope;
+  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, cmpAId, cmpBId, cmpRows } = scope;
   const rankingHref = `#/teacher/analytics/ranking${filterQuery(scope)}`;
-  const topRows = studentRows.filter(row => row.average !== null).slice(0, 5);
   const content = `<div class="teacher-page-head">
     <div>
       <div class="eyebrow">${icon('chart', 12)} ภาพรวมผลการเรียน</div>
@@ -336,29 +440,38 @@ export function teacherAnalyticsView(ctx) {
   </div>
   <div class="analytics-chart-grid">
     <section class="analytics-panel card analytics-chart-panel analytics-chart-panel--wide">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('trending-up', 11)} แนวโน้มผลการเรียน</span><h2>คะแนนเฉลี่ยตามชุดสอบ</h2></div><span class="badge badge--neutral">${examTrend.length} ชุด</span></div>
+      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('trending-up', 11)} แนวโน้มผลการเรียน</span><h2>คะแนนเฉลี่ยตามชุดสอบ</h2></div><div class="analytics-panel__tools"><label class="sr-only" for="trend-class">กรองตาม class</label><select class="select select--compact" id="trend-class" data-local-param="trendClass"><option value="all" ${trendClassId === 'all' ? 'selected' : ''}>ทุก class</option>${scope.classes.map(cls => `<option value="${e(cls.id)}" ${cls.id === trendClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select><span class="badge badge--neutral">${examTrend.length} ชุด</span></div></div>
       ${trendChart(examTrend)}
     </section>
     <section class="analytics-panel card analytics-chart-panel">
       <div class="analytics-panel__head"><div><span class="eyebrow">${icon('bar-chart', 11)} การกระจายคะแนน</span><h2>ช่วงคะแนนของนักเรียน</h2></div><span class="badge badge--neutral">${attempts.length} ครั้ง</span></div>
-      ${distributionChart(distributionBands)}
+      ${boxPlot(scoreValues)}
     </section>
   </div>
   <div class="analytics-columns">
     <section class="analytics-panel card">
       <div class="analytics-panel__head"><div><span class="eyebrow">${icon('award', 11)} อันดับเด่น</span><h2>นักเรียนที่ทำคะแนนได้ดี</h2></div><a class="btn btn--link" href="${rankingHref}">ทั้งหมด ${icon('arrow-right', 12)}</a></div>
+      <div class="analytics-local-filters">
+        <div class="field"><label for="top-exam">ชุดสอบ</label><select class="select select--compact" id="top-exam" data-local-param="exam"><option value="">เลือกชุดสอบ</option>${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === topExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></div>
+        <div class="field"><label for="top-class">class</label><select class="select select--compact" id="top-class" data-local-param="examClass"><option value="all" ${topClassId === 'all' ? 'selected' : ''}>ทุก class</option>${topClassOptions.map(cls => `<option value="${e(cls.id)}" ${cls.id === topClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select></div>
+      </div>
       ${topRows.length ? `<div class="analytics-mini-rank">
         ${topRows.map(row => `<a class="analytics-mini-row" href="#/teacher/student/${row.student.id}">
           <span class="analytics-mini-row__rank">${row.rank}</span>
           ${avatar(row.student.name, row.student.id, 'xs')}
           <span class="analytics-mini-row__name"><strong>${e(row.student.name)}</strong><small>${e(row.classLabel)}</small></span>
-          <strong class="analytics-mini-row__score">${row.average}%</strong>
+          <strong class="analytics-mini-row__score">${formatNumber(row.row.score.percent, 0)}%</strong>
         </a>`).join('')}
       </div>` : `<div class="analytics-empty">${icon('bar-chart', 22)}<span>ยังไม่มีผลสอบที่ส่งแล้วในขอบเขตนี้</span></div>`}
     </section>
     <section class="analytics-panel card">
       <div class="analytics-panel__head"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><span class="badge badge--neutral">${classStats.length} class</span></div>
-      ${classPerformance(classStats)}
+      <div class="analytics-local-filters analytics-local-filters--compare">
+        <div class="field"><label for="cmp-a">class A</label><select class="select select--compact" id="cmp-a" data-local-param="cmpA">${classStats.map(row => `<option value="${e(row.id)}" ${row.id === cmpAId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
+        <span class="compare-vs">เทียบกับ</span>
+        <div class="field"><label for="cmp-b">class B</label><select class="select select--compact" id="cmp-b" data-local-param="cmpB">${classStats.map(row => `<option value="${e(row.id)}" ${row.id === cmpBId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
+      </div>
+      ${classCompare(cmpRows)}
     </section>
   </div>
 
@@ -444,4 +557,16 @@ function mountAnalyticsFilters() {
     go();
   });
   form.querySelector('[name="class"]')?.addEventListener('change', go);
+
+  const setLocalParam = (key, value) => {
+    const raw = (location.hash.split('?')[1] || '');
+    const params = new URLSearchParams(raw);
+    if (!value || value === 'all') params.delete(key); else params.set(key, value);
+    if (key === 'exam') params.delete('examClass');
+    const query = params.toString();
+    navigate(`/teacher/analytics${query ? `?${query}` : ''}`);
+  };
+  document.querySelectorAll('[data-local-param]').forEach(select => {
+    select.addEventListener('change', () => setLocalParam(select.dataset.localParam, select.value));
+  });
 }
