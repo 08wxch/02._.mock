@@ -2525,7 +2525,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
    ============================================================ */
 .available-exams { padding: 19px; }
 .available-exams .section-heading { align-items: flex-start; }
-.available-exams__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 9px; margin-top: 13px; }
+.available-exams__grid { display: grid; grid-template-columns: 1fr; gap: 9px; margin-top: 13px; }
 .available-exam-card {
   display: flex; flex-direction: column; gap: 8px; padding: 13px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
