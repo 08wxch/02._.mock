@@ -2,7 +2,7 @@ import { icon } from '../icons.js';
 import {
   e, thaiDate, thaiDateTime, thaiTime, longThaiDate, shortThaiDate,
   formatCountdownWords, formatDuration, formatStopwatch, percent,
-  relativeTime, greetingByHour, typeLabel, typeHint,
+  relativeTime, typeLabel, typeHint,
   initials, formatNumber, makePrintHeader
 } from '../utils.js';
 import {
@@ -324,13 +324,22 @@ export function studentDashboardView(ctx) {
     </div>`;
   }
 
-  const otherExams = activeExams.slice(1);
-  const examPicker = otherExams.length ? `<section class="available-exams card">
+  // All open exams, including the exam in the hero above. Submitted or
+  // announced exams go last; everything else is ordered by the least time left.
+  const pickerExams = activeExams.slice().sort((a, b) => {
+    const doneA = a.status === 'announced' || studentAttemptState(a, session) === 'submitted';
+    const doneB = b.status === 'announced' || studentAttemptState(b, session) === 'submitted';
+    if (doneA !== doneB) return doneA ? 1 : -1;
+    const timeA = new Date(a.closeAt).getTime();
+    const timeB = new Date(b.closeAt).getTime();
+    return (Number.isFinite(timeA) ? timeA : Infinity) - (Number.isFinite(timeB) ? timeB : Infinity);
+  });
+  const examPicker = pickerExams.length ? `<section class="available-exams card">
     <div class="section-heading">
-      <div><h2>ชุดสอบอื่นที่ทำได้</h2><p>คุณมีข้อสอบที่เปิดอยู่อีก ${otherExams.length} ชุด · เรียงตามความเร่งด่วนและกำหนดปิดรับ</p></div>
-      <span class="badge badge--neutral">${icon('file-text', 11)} ${activeExams.length} ชุดที่ทำได้</span>
+      <div><h2>ชุดสอบทั้งหมด</h2><p>เปิดอยู่ ${pickerExams.length} ชุด · เรียงจากเวลาที่เหลือน้อยที่สุด และชุดที่ทำแล้วไว้ด้านล่าง</p></div>
+      <span class="badge badge--neutral">${icon('file-text', 11)} ${pickerExams.length} ชุด</span>
     </div>
-    <div class="available-exams__grid">${otherExams.map(ex => availableExamCard(ex, session)).join('')}</div>
+    <div class="available-exams__grid">${pickerExams.map(ex => availableExamCard(ex, session)).join('')}</div>
   </section>` : '';
 
   const upcomingPanel = upcomingExams.length ? `<section class="available-exams card upcoming-exams">
@@ -410,8 +419,7 @@ export function studentDashboardView(ctx) {
     <div class="container">
       <div class="dashboard-heading">
         <div>
-          <div class="eyebrow">${icon('sparkles', 12)} ${greetingByHour()} · ${thaiDate(now)}</div>
-          <h1>สวัสดี, <span>${e(firstName(session.name))}</span></h1>
+          <h1>${e(session.name)}</h1>
           <p>${activeExams.length > 1 ? `มีชุดสอบเปิดอยู่ ${activeExams.length} ชุด เลือกทำตามกำหนดปิดรับได้เลย` : activeExams.length ? 'มีชุดสอบเปิดอยู่ รักษาเวลาและสมาธิให้ดีนะ' : upcomingExams.length ? `มีกำหนดการสอบที่กำลังจะมาถึง ${upcomingExams.length} ชุด ตรวจสอบวันเวลาได้เลย` : 'วันนี้ยังไม่มีกำหนดสอบ พักผ่อนและทบทวนบทเรียนได้เลย'}</p>
         </div>
         <div class="dashboard-date">${icon('calendar', 16)} ${longThaiDate(now)}</div>
