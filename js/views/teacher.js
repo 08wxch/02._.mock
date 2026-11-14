@@ -1585,15 +1585,17 @@ export function teacherAnswerView(ctx) {
     let statusClass = 'wrong';
     let statusText = 'ตอบผิด';
     if (q.type === 'essay') {
-      statusClass = manual ? 'correct' : 'pending';
-      statusText = manual ? `ให้ ${formatNumber(manual.score, 1)}/${q.points}` : 'รอตรวจ';
+      statusClass = manual ? (Number(manual.score) > 0 ? 'correct' : 'wrong') : 'pending';
+      statusText = manual
+        ? `${Number(manual.score) > 0 ? 'ถูก' : 'ผิด'} · ให้ ${formatNumber(manual.score, 1)}/${q.points}`
+        : 'รอตรวจ';
     } else if (isShort) {
       if (shortPending) {
         statusClass = 'pending';
         statusText = 'รอตรวจคำตอบ';
       } else if (manual) {
         statusClass = Number(manual.score) > 0 ? 'correct' : 'wrong';
-        statusText = `ให้ ${formatNumber(manual.score, 1)}/${q.points}`;
+        statusText = `${Number(manual.score) > 0 ? 'ถูก' : 'ผิด'} · ให้ ${formatNumber(manual.score, 1)}/${q.points}`;
       } else if (isCorrect(q, value)) {
         statusClass = 'correct';
         statusText = 'ถูกต้อง';
@@ -3385,11 +3387,13 @@ export function teacherStudentExamView(ctx) {
     const manual = attempt.manualScores?.[q.id];
     const isShort = q.type === 'short';
     const shortPending = isShort && pendingIds.has(q.id);
-    const correct = q.type === 'essay' || shortPending
-      ? null
-      : isShort && manual
-        ? Number(manual.score) >= q.points * 0.6
-        : isCorrect(q, value);
+    const correct = q.type === 'essay'
+      ? (manual ? Number(manual.score) > 0 : null)
+      : shortPending
+        ? null
+        : isShort && manual
+          ? Number(manual.score) > 0
+          : isCorrect(q, value);
     const points = q.type === 'essay'
       ? (manual?.score ?? 'รอตรวจ')
       : isShort

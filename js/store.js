@@ -2354,8 +2354,8 @@ export function questionStats(exam) {
         q, index, type: 'essay',
         answered: submissions.filter(a => !answerIsEmpty(a.answers?.[q.id]?.value)).length,
         total: submissions.length,
-        correct: graded.filter(a => Number(a.manualScores[q.id].score) >= q.points * 0.6).length,
-        correctPercent: graded.length ? Math.round((graded.filter(a => Number(a.manualScores[q.id].score) >= q.points * 0.6).length / graded.length) * 100) : 0,
+        correct: graded.filter(a => Number(a.manualScores[q.id].score) > 0).length,
+        correctPercent: graded.length ? Math.round((graded.filter(a => Number(a.manualScores[q.id].score) > 0).length / graded.length) * 100) : 0,
         average: avg,
         graded: graded.length
       };
