@@ -166,14 +166,17 @@ function scopeFor(ctx) {
     .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
     .slice(-8);
 
-  // Local comparison filters: pick any two classes without changing the
-  // page-wide organisation/class scope.
-  const classStatIds = classStats.map(row => row.id);
+  // Local comparison filters: pick any two classes in the current scope.
+  // Classes without attempts remain selectable and show an em dash.
+  const comparisonClasses = classes.map(cls => classStats.find(row => row.id === cls.id) || {
+    id: cls.id, label: classNameOf(cls), average: null, attempts: 0, passRate: null, students: 0
+  });
+  const classStatIds = comparisonClasses.map(row => row.id);
   const requestedA = queryValue(ctx, 'cmpA');
   const requestedB = queryValue(ctx, 'cmpB');
   const cmpAId = classStatIds.includes(requestedA) ? requestedA : (classStatIds[0] || '');
   const cmpBId = classStatIds.includes(requestedB) && requestedB !== cmpAId ? requestedB : (classStatIds.find(id => id !== cmpAId) || '');
-  const cmpRows = [cmpAId, cmpBId].filter(Boolean).map(id => classStats.find(row => row.id === id)).filter(Boolean);
+  const cmpRows = [cmpAId, cmpBId].filter(Boolean).map(id => comparisonClasses.find(row => row.id === id)).filter(Boolean);
 
   // Top-student filters: exam first, then the classes that actually appear in
   // that exam. "all" means every class in the current organisation scope.
@@ -216,7 +219,7 @@ function scopeFor(ctx) {
     average, passRate, passCount: passed, highest,
     studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel,
     trendClassId, trendScored, topExamId, topExam, topExamScored, topExamOptions: examsWithAttempts, topClassOptions, topClassId, topRows,
-    classStatIds, cmpAId, cmpBId, cmpRows
+    comparisonClasses, classStatIds, cmpAId, cmpBId, cmpRows
   };
 }
 
@@ -353,20 +356,20 @@ function boxPlot(values) {
   const whiskerLow = sorted.find(v => v >= lowFence) ?? min;
   const whiskerHigh = [...sorted].reverse().find(v => v <= highFence) ?? max;
   const outliers = sorted.filter(v => v < whiskerLow || v > whiskerHigh);
-  const width = 720;
-  const height = 230;
-  const pad = { top: 18, right: 28, bottom: 34, left: 44 };
+  const width = 460;
+  const height = 240;
+  const pad = { top: 18, right: 22, bottom: 34, left: 38 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const cx = pad.left + plotW * .5;
-  const boxW = 138;
+  const boxW = 102;
   const yAt = (v) => pad.top + ((100 - Math.max(0, Math.min(100, v))) / 100) * plotH;
   const grid = [0, 25, 50, 75, 100].map(v => `<line x1="${pad.left}" x2="${width - pad.right}" y1="${yAt(v)}" y2="${yAt(v)}" class="trend-grid-line"></line><text x="${pad.left - 9}" y="${yAt(v) + 3}" text-anchor="end" class="trend-axis-label">${v}</text>`).join('');
   const dots = sorted.map((v, i) => {
-    const x = cx - 94 + ((i * 37) % 188);
+    const x = cx - 70 + ((i * 31) % 140);
     return `<circle cx="${x}" cy="${yAt(v)}" r="2.1" class="box-dot"></circle>`;
   }).join('');
-  const outlierDots = outliers.map((v, i) => `<circle cx="${cx + (i % 2 ? 32 : -32)}" cy="${yAt(v)}" r="3.2" class="box-outlier"></circle>`).join('');
+  const outlierDots = outliers.map((v, i) => `<circle cx="${cx + (i % 2 ? 24 : -24)}" cy="${yAt(v)}" r="3.2" class="box-outlier"></circle>`).join('');
   const summary = `<div class="box-summary"><span>ต่ำสุด <b>${formatNumber(min, 0)}%</b></span><span>Q1 <b>${formatNumber(q1, 0)}%</b></span><span>มัธยฐาน <b>${formatNumber(median, 0)}%</b></span><span>Q3 <b>${formatNumber(q3, 0)}%</b></span><span>สูงสุด <b>${formatNumber(max, 0)}%</b></span></div>`;
   return `<div class="analytics-box-wrap">
     <svg class="analytics-box-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="แผนภาพกล่องคะแนนนักเรียน">
@@ -400,12 +403,15 @@ function classPerformance(classStats) {
 
 function classCompare(rows) {
   if (!rows.length) return `<div class="analytics-empty analytics-empty--chart">${icon('school', 22)}<span>ยังไม่มีคะแนนแยกตาม class</span></div>`;
-  return `<div class="class-compare-grid">${rows.map((row, index) => `<div class="class-compare-card">
+  return `<div class="class-compare-grid">${rows.map((row, index) => {
+    const value = row.average === null ? null : Number(row.average);
+    return `<div class="class-compare-card">
     <span class="class-compare-card__tag">class ${index ? 'B' : 'A'}</span>
-    <div class="class-compare-card__top"><strong>${e(row.label)}</strong><b>${row.average}%</b></div>
-    <div class="class-compare-card__bar"><span style="width:${row.average}%"></span></div>
-    <small>${row.students} คน · ${row.attempts} ครั้ง · ผ่าน ${row.passRate}%</small>
-  </div>`).join('')}</div>`;
+    <div class="class-compare-card__top"><strong>${e(row.label)}</strong><b>${value === null ? '—' : `${value}%`}</b></div>
+    <div class="class-compare-card__bar"><span style="width:${value === null ? 0 : value}%"></span></div>
+    <small>${row.students} คน · ${row.attempts} ครั้ง · ${row.passRate === null ? 'ยังไม่มีผล' : `ผ่าน ${row.passRate}%`}</small>
+  </div>`;
+  }).join('')}</div>`;
 }
 
 export function teacherAnalyticsView(ctx) {
@@ -419,7 +425,7 @@ export function teacherAnalyticsView(ctx) {
       mount: () => mountTeacherShell(ctx.session)
     };
   }
-  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, cmpAId, cmpBId, cmpRows } = scope;
+  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpAId, cmpBId, cmpRows } = scope;
   const rankingHref = `#/teacher/analytics/ranking${filterQuery(scope)}`;
   const content = `<div class="teacher-page-head">
     <div>
@@ -465,11 +471,11 @@ export function teacherAnalyticsView(ctx) {
       </div>` : `<div class="analytics-empty">${icon('bar-chart', 22)}<span>ยังไม่มีผลสอบที่ส่งแล้วในขอบเขตนี้</span></div>`}
     </section>
     <section class="analytics-panel card">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><span class="badge badge--neutral">${classStats.length} class</span></div>
+      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><span class="badge badge--neutral">${comparisonClasses.length} class</span></div>
       <div class="analytics-local-filters analytics-local-filters--compare">
-        <div class="field"><label for="cmp-a">class A</label><select class="select select--compact" id="cmp-a" data-local-param="cmpA">${classStats.map(row => `<option value="${e(row.id)}" ${row.id === cmpAId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
+        <div class="field"><label for="cmp-a">class A</label><select class="select select--compact" id="cmp-a" data-local-param="cmpA">${comparisonClasses.map(row => `<option value="${e(row.id)}" ${row.id === cmpAId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
         <span class="compare-vs">เทียบกับ</span>
-        <div class="field"><label for="cmp-b">class B</label><select class="select select--compact" id="cmp-b" data-local-param="cmpB">${classStats.map(row => `<option value="${e(row.id)}" ${row.id === cmpBId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
+        <div class="field"><label for="cmp-b">class B</label><select class="select select--compact" id="cmp-b" data-local-param="cmpB">${comparisonClasses.map(row => `<option value="${e(row.id)}" ${row.id === cmpBId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
       </div>
       ${classCompare(cmpRows)}
     </section>

@@ -3362,3 +3362,4 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .analytics-local-filters { gap: 7px; }
   .analytics-local-filters .field { min-width: 130px; flex: 1; }
 }
+.analytics-box-chart { height: auto; }
