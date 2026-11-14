@@ -3365,3 +3365,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .analytics-box-chart { height: auto; }
 .analytics-chart-grid { grid-template-columns: 1fr 1fr; }
 @media (max-width: 1100px) { .analytics-chart-grid { grid-template-columns: 1fr; } }
+.box-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px 8px; padding: 6px 2px 0; font-size: 9px; }
+.box-summary span { display: block; white-space: nowrap; }
+.box-summary b { display: block; margin-top: 1px; font-size: 11px; }
+@media (max-width: 760px) { .box-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
