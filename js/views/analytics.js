@@ -172,11 +172,19 @@ function scopeFor(ctx) {
     id: cls.id, label: classNameOf(cls), average: null, attempts: 0, passRate: null, students: 0
   });
   const classStatIds = comparisonClasses.map(row => row.id);
-  const requestedA = queryValue(ctx, 'cmpA');
-  const requestedB = queryValue(ctx, 'cmpB');
-  const cmpAId = classStatIds.includes(requestedA) ? requestedA : (classStatIds[0] || '');
-  const cmpBId = classStatIds.includes(requestedB) && requestedB !== cmpAId ? requestedB : (classStatIds.find(id => id !== cmpAId) || '');
-  const cmpRows = [cmpAId, cmpBId].filter(Boolean).map(id => comparisonClasses.find(row => row.id === id)).filter(Boolean);
+  const requestedCmp = queryValue(ctx, 'cmp');
+  const oldA = queryValue(ctx, 'cmpA');
+  const oldB = queryValue(ctx, 'cmpB');
+  const requestedCmpIds = (requestedCmp ? requestedCmp.split(',') : [oldA, oldB]).filter(id => classStatIds.includes(id));
+  const cmpIds = requestedCmpIds.length ? [...new Set(requestedCmpIds)] : classStatIds.slice(0, 2);
+  const cmpRows = cmpIds.map(id => comparisonClasses.find(row => row.id === id)).filter(Boolean);
+
+  // Box plot has its own exam filter; the five-number summary sits above it.
+  const requestedBoxExam = queryValue(ctx, 'boxExam');
+  const boxExamId = exams.some(exam => exam.id === requestedBoxExam && scored.some(row => row.exam.id === exam.id)) ? requestedBoxExam : 'all';
+  const boxScored = boxExamId === 'all' ? scored : scored.filter(row => row.exam.id === boxExamId);
+  const boxValues = boxScored.map(row => row.score.percent);
+  const boxExamTitle = boxExamId === 'all' ? 'ทุกชุดสอบ' : (exams.find(exam => exam.id === boxExamId)?.title || 'ชุดสอบ');
 
   // Top-student filters: exam first, then the classes that actually appear in
   // that exam. "all" means every class in the current organisation scope.
@@ -219,7 +227,8 @@ function scopeFor(ctx) {
     average, passRate, passCount: passed, highest,
     studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel,
     trendClassId, trendScored, topExamId, topExam, topExamScored, topExamOptions: examsWithAttempts, topClassOptions, topClassId, topRows,
-    comparisonClasses, classStatIds, cmpAId, cmpBId, cmpRows
+    comparisonClasses, classStatIds, cmpIds, cmpRows,
+    boxExamId, boxValues, boxExamTitle
   };
 }
 
@@ -333,7 +342,7 @@ function distributionChart(bands) {
   <div class="analytics-chart-caption"><span><i class="analytics-dot analytics-dot--coral"></i> จำนวนครั้งที่ส่ง</span><span>${total} ครั้ง</span></div>`;
 }
 
-function boxPlot(values) {
+function boxPlot(values, examTitle = 'ทุกชุดสอบ') {
   if (!values.length) {
     return `<div class="analytics-empty analytics-empty--chart">${icon('bar-chart', 22)}<span>ยังไม่มีคะแนนสำหรับดูการกระจาย</span></div>`;
   }
@@ -356,35 +365,32 @@ function boxPlot(values) {
   const whiskerLow = sorted.find(v => v >= lowFence) ?? min;
   const whiskerHigh = [...sorted].reverse().find(v => v <= highFence) ?? max;
   const outliers = sorted.filter(v => v < whiskerLow || v > whiskerHigh);
-  const width = 460;
-  const height = 240;
-  const pad = { top: 18, right: 22, bottom: 34, left: 38 };
+  const width = 720;
+  const height = 210;
+  const pad = { top: 24, right: 30, bottom: 38, left: 42 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
-  const cx = pad.left + plotW * .5;
-  const boxW = 102;
-  const yAt = (v) => pad.top + ((100 - Math.max(0, Math.min(100, v))) / 100) * plotH;
-  const grid = [0, 25, 50, 75, 100].map(v => `<line x1="${pad.left}" x2="${width - pad.right}" y1="${yAt(v)}" y2="${yAt(v)}" class="trend-grid-line"></line><text x="${pad.left - 9}" y="${yAt(v) + 3}" text-anchor="end" class="trend-axis-label">${v}</text>`).join('');
-  const dots = sorted.map((v, i) => {
-    const x = cx - 70 + ((i * 31) % 140);
-    return `<circle cx="${x}" cy="${yAt(v)}" r="2.1" class="box-dot"></circle>`;
-  }).join('');
-  const outlierDots = outliers.map((v, i) => `<circle cx="${cx + (i % 2 ? 24 : -24)}" cy="${yAt(v)}" r="3.2" class="box-outlier"></circle>`).join('');
+  const cy = pad.top + plotH * .5;
+  const boxH = 58;
+  const xAt = (v) => pad.left + (Math.max(0, Math.min(100, v)) / 100) * plotW;
+  const grid = [0, 25, 50, 75, 100].map(v => `<line x1="${xAt(v)}" x2="${xAt(v)}" y1="${pad.top}" y2="${height - pad.bottom}" class="trend-grid-line"></line><text x="${xAt(v)}" y="${height - 16}" text-anchor="middle" class="trend-axis-label">${v}</text>`).join('');
+  const dots = sorted.map((v, i) => `<circle cx="${xAt(v)}" cy="${cy + ((i * 13) % 44) - 22}" r="2.2" class="box-dot"></circle>`).join('');
+  const outlierDots = outliers.map((v, i) => `<circle cx="${xAt(v)}" cy="${cy + (i % 2 ? 38 : -38)}" r="3.4" class="box-outlier"></circle>`).join('');
   const summary = `<div class="box-summary"><span>ต่ำสุด <b>${formatNumber(min, 0)}%</b></span><span>Q1 <b>${formatNumber(q1, 0)}%</b></span><span>มัธยฐาน <b>${formatNumber(median, 0)}%</b></span><span>Q3 <b>${formatNumber(q3, 0)}%</b></span><span>สูงสุด <b>${formatNumber(max, 0)}%</b></span></div>`;
   return `<div class="analytics-box-wrap">
-    <svg class="analytics-box-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="แผนภาพกล่องคะแนนนักเรียน">
+    ${summary}
+    <svg class="analytics-box-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="แผนภาพกล่องคะแนนนักเรียน แนวนอน">
       ${grid}
-      <line x1="${cx}" x2="${cx}" y1="${yAt(whiskerHigh)}" y2="${yAt(q3)}" class="box-whisker"></line>
-      <line x1="${cx}" x2="${cx}" y1="${yAt(q1)}" y2="${yAt(whiskerLow)}" class="box-whisker"></line>
-      <line x1="${cx - 30}" x2="${cx + 30}" y1="${yAt(whiskerHigh)}" y2="${yAt(whiskerHigh)}" class="box-cap"></line>
-      <line x1="${cx - 30}" x2="${cx + 30}" y1="${yAt(whiskerLow)}" y2="${yAt(whiskerLow)}" class="box-cap"></line>
-      <rect x="${cx - boxW / 2}" y="${yAt(q3)}" width="${boxW}" height="${Math.max(1, yAt(q1) - yAt(q3))}" rx="5" class="box-body"></rect>
-      <line x1="${cx - boxW / 2}" x2="${cx + boxW / 2}" y1="${yAt(median)}" y2="${yAt(median)}" class="box-median"></line>
+      <line x1="${xAt(whiskerLow)}" x2="${xAt(q1)}" y1="${cy}" y2="${cy}" class="box-whisker"></line>
+      <line x1="${xAt(q3)}" x2="${xAt(whiskerHigh)}" y1="${cy}" y2="${cy}" class="box-whisker"></line>
+      <line x1="${xAt(whiskerLow)}" x2="${xAt(whiskerLow)}" y1="${cy - 20}" y2="${cy + 20}" class="box-cap"></line>
+      <line x1="${xAt(whiskerHigh)}" x2="${xAt(whiskerHigh)}" y1="${cy - 20}" y2="${cy + 20}" class="box-cap"></line>
+      <rect x="${xAt(q1)}" y="${cy - boxH / 2}" width="${Math.max(1, xAt(q3) - xAt(q1))}" height="${boxH}" rx="6" class="box-body"></rect>
+      <line x1="${xAt(median)}" x2="${xAt(median)}" y1="${cy - boxH / 2}" y2="${cy + boxH / 2}" class="box-median"></line>
       ${dots}
       ${outlierDots}
     </svg>
-    ${summary}
-    <div class="analytics-chart-caption"><span><i class="analytics-dot"></i> คะแนน (%)</span><span>${n} ครั้งที่ส่ง · กล่อง = Q1–Q3 · เส้นกลาง = มัธยฐาน</span></div>
+    <div class="analytics-chart-caption"><span><i class="analytics-dot"></i> ${e(examTitle)}</span><span>${n} ครั้งที่ส่ง · กล่อง = Q1–Q3 · เส้นกลาง = มัธยฐาน</span></div>
   </div>`;
 }
 
@@ -425,7 +431,7 @@ export function teacherAnalyticsView(ctx) {
       mount: () => mountTeacherShell(ctx.session)
     };
   }
-  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpAId, cmpBId, cmpRows } = scope;
+  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle } = scope;
   const rankingHref = `#/teacher/analytics/ranking${filterQuery(scope)}`;
   const content = `<div class="teacher-page-head">
     <div>
@@ -446,21 +452,17 @@ export function teacherAnalyticsView(ctx) {
   </div>
   <div class="analytics-chart-grid">
     <section class="analytics-panel card analytics-chart-panel analytics-chart-panel--wide">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('trending-up', 11)} แนวโน้มผลการเรียน</span><h2>คะแนนเฉลี่ยตามชุดสอบ</h2></div><div class="analytics-panel__tools"><label class="sr-only" for="trend-class">กรองตาม class</label><select class="select select--compact" id="trend-class" data-local-param="trendClass"><option value="all" ${trendClassId === 'all' ? 'selected' : ''}>ทุก class</option>${scope.classes.map(cls => `<option value="${e(cls.id)}" ${cls.id === trendClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select><span class="badge badge--neutral">${examTrend.length} ชุด</span></div></div>
+      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('trending-up', 11)} แนวโน้มผลการเรียน</span><h2>คะแนนเฉลี่ยตามชุดสอบ</h2></div><div class="analytics-panel__filters"><label class="head-filter"><span>class</span><select class="select select--compact" data-local-param="trendClass"><option value="all" ${trendClassId === 'all' ? 'selected' : ''}>ทุก class</option>${scope.classes.map(cls => `<option value="${e(cls.id)}" ${cls.id === trendClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select></label><span class="badge badge--neutral">${examTrend.length} ชุด</span></div></div>
       ${trendChart(examTrend)}
     </section>
     <section class="analytics-panel card analytics-chart-panel">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('bar-chart', 11)} การกระจายคะแนน</span><h2>ช่วงคะแนนของนักเรียน</h2></div><span class="badge badge--neutral">${attempts.length} ครั้ง</span></div>
-      ${boxPlot(scoreValues)}
+      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('bar-chart', 11)} การกระจายคะแนน</span><h2>ช่วงคะแนนของนักเรียน</h2></div><div class="analytics-panel__filters"><label class="head-filter"><span>ชุดข้อสอบ</span><select class="select select--compact" data-local-param="boxExam"><option value="all" ${boxExamId === 'all' ? 'selected' : ''}>ทุกชุด</option>${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === boxExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></label><span class="badge badge--neutral">${boxValues.length} ครั้ง</span></div></div>
+      ${boxPlot(boxValues, boxExamTitle)}
     </section>
   </div>
   <div class="analytics-columns">
     <section class="analytics-panel card">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('award', 11)} อันดับเด่น</span><h2>นักเรียนที่ทำคะแนนได้ดี</h2></div><a class="btn btn--link" href="${rankingHref}">ทั้งหมด ${icon('arrow-right', 12)}</a></div>
-      <div class="analytics-local-filters">
-        <div class="field"><label for="top-exam">ชุดสอบ</label><select class="select select--compact" id="top-exam" data-local-param="exam"><option value="">เลือกชุดสอบ</option>${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === topExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></div>
-        <div class="field"><label for="top-class">class</label><select class="select select--compact" id="top-class" data-local-param="examClass"><option value="all" ${topClassId === 'all' ? 'selected' : ''}>ทุก class</option>${topClassOptions.map(cls => `<option value="${e(cls.id)}" ${cls.id === topClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select></div>
-      </div>
+      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('award', 11)} อันดับเด่น</span><h2>นักเรียนที่ทำคะแนนได้ดี</h2></div><div class="analytics-panel__filters analytics-panel__filters--stack"><label class="head-filter"><span>ชุดสอบ</span><select class="select select--compact" data-local-param="exam">${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === topExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></label><label class="head-filter"><span>class</span><select class="select select--compact" data-local-param="examClass"><option value="all" ${topClassId === 'all' ? 'selected' : ''}>ทุก class</option>${topClassOptions.map(cls => `<option value="${e(cls.id)}" ${cls.id === topClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select></label><a class="btn btn--link" href="${rankingHref}">ทั้งหมด ${icon('arrow-right', 12)}</a></div></div>
       ${topRows.length ? `<div class="analytics-mini-rank">
         ${topRows.map(row => `<a class="analytics-mini-row" href="#/teacher/student/${row.student.id}">
           <span class="analytics-mini-row__rank">${row.rank}</span>
@@ -471,12 +473,7 @@ export function teacherAnalyticsView(ctx) {
       </div>` : `<div class="analytics-empty">${icon('bar-chart', 22)}<span>ยังไม่มีผลสอบที่ส่งแล้วในขอบเขตนี้</span></div>`}
     </section>
     <section class="analytics-panel card">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><span class="badge badge--neutral">${comparisonClasses.length} class</span></div>
-      <div class="analytics-local-filters analytics-local-filters--compare">
-        <div class="field"><label for="cmp-a">class A</label><select class="select select--compact" id="cmp-a" data-local-param="cmpA">${comparisonClasses.map(row => `<option value="${e(row.id)}" ${row.id === cmpAId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
-        <span class="compare-vs">เทียบกับ</span>
-        <div class="field"><label for="cmp-b">class B</label><select class="select select--compact" id="cmp-b" data-local-param="cmpB">${comparisonClasses.map(row => `<option value="${e(row.id)}" ${row.id === cmpBId ? 'selected' : ''}>${e(row.label)}</option>`).join('') || '<option value="">—</option>'}</select></div>
-      </div>
+      <div class="analytics-panel__head analytics-panel__head--wrap"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><div class="analytics-panel__filters"><div class="class-filter-chips" role="group" aria-label="เลือก class ที่จะเปรียบเทียบ">${comparisonClasses.map(row => `<button type="button" class="class-filter-chip ${cmpIds.includes(row.id) ? 'is-active' : ''}" data-cmp-class="${e(row.id)}">${e(row.label)}</button>`).join('')}</div><span class="badge badge--neutral">${cmpIds.length} class</span></div></div>
       ${classCompare(cmpRows)}
     </section>
   </div>
@@ -574,5 +571,20 @@ function mountAnalyticsFilters() {
   };
   document.querySelectorAll('[data-local-param]').forEach(select => {
     select.addEventListener('change', () => setLocalParam(select.dataset.localParam, select.value));
+  });
+
+  document.querySelectorAll('[data-cmp-class]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const selected = [...document.querySelectorAll('[data-cmp-class].is-active')].map(el => el.dataset.cmpClass);
+      const id = chip.dataset.cmpClass;
+      let next = selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id];
+      if (!next.length) next = [id];
+      const raw = (location.hash.split('?')[1] || '');
+      const params = new URLSearchParams(raw);
+      params.set('cmp', next.join(','));
+      params.delete('cmpA');
+      params.delete('cmpB');
+      navigate(`/teacher/analytics?${params.toString()}`);
+    });
   });
 }
