@@ -3363,3 +3363,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .analytics-local-filters .field { min-width: 130px; flex: 1; }
 }
 .analytics-box-chart { height: auto; }
+.analytics-chart-grid { grid-template-columns: 1fr 1fr; }
+@media (max-width: 1100px) { .analytics-chart-grid { grid-template-columns: 1fr; } }
