@@ -5,7 +5,7 @@ import { authView } from './views/auth.js';
 import {
   studentDashboardView, instructionsView, examView, successView,
   resultView, historyView
-} from './views/student.js';
+} from './views/student.js?v=20261117a';
 import {
   teacherDashboardView, teacherExamsView, teacherExamView, teacherExamPreviewView,
   teacherAnswerView, teacherReviewView, teacherStudentsView, teacherStaffView,
