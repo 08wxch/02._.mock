@@ -473,7 +473,7 @@ export function teacherAnalyticsView(ctx) {
       </div>` : `<div class="analytics-empty">${icon('bar-chart', 22)}<span>ยังไม่มีผลสอบที่ส่งแล้วในขอบเขตนี้</span></div>`}
     </section>
     <section class="analytics-panel card">
-      <div class="analytics-panel__head analytics-panel__head--wrap"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><div class="analytics-panel__filters"><div class="class-filter-chips" role="group" aria-label="เลือก class ที่จะเปรียบเทียบ">${comparisonClasses.map(row => `<button type="button" class="class-filter-chip ${cmpIds.includes(row.id) ? 'is-active' : ''}" data-cmp-class="${e(row.id)}">${e(row.label)}</button>`).join('')}<button type="button" class="class-filter-chip class-filter-chip--all" data-cmp-all>เลือกทั้งหมด</button></div><span class="badge badge--neutral">${cmpIds.length} class</span></div></div>
+      <div class="analytics-panel__head analytics-panel__head--wrap"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><div class="analytics-panel__filters"><details class="class-picker"><summary class="class-picker__summary">เลือก class <span class="class-picker__count" data-cmp-count>${cmpIds.length}</span></summary><div class="class-picker__panel"><label class="class-picker__search"><span>ค้นหา class</span><input type="search" data-cmp-search placeholder="พิมพ์ชื่อหรือรหัส class"></label><div class="class-picker__list" role="group" aria-label="เลือก class ที่จะเปรียบเทียบ">${comparisonClasses.map(row => `<label class="class-picker__option"><input type="checkbox" data-cmp-class value="${e(row.id)}" ${cmpIds.includes(row.id) ? 'checked' : ''}><span>${e(row.label)}</span><small>${row.students} คน</small></label>`).join('')}</div><div class="class-picker__foot"><button type="button" class="btn btn--ghost btn--sm" data-cmp-all>เลือกทั้งหมด</button><button type="button" class="btn btn--primary btn--sm" data-cmp-apply>ใช้ที่เลือก</button></div></div></details><span class="badge badge--neutral">${cmpIds.length} class</span></div></div>
       ${classCompare(cmpRows)}
     </section>
   </div>
@@ -573,26 +573,26 @@ function mountAnalyticsFilters() {
     select.addEventListener('change', () => setLocalParam(select.dataset.localParam, select.value));
   });
 
-  document.querySelectorAll('[data-cmp-class]').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const selected = [...document.querySelectorAll('[data-cmp-class].is-active')].map(el => el.dataset.cmpClass);
-      const id = chip.dataset.cmpClass;
-      let next = selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id];
-      if (!next.length) next = [id];
-      const raw = (location.hash.split('?')[1] || '');
-      const params = new URLSearchParams(raw);
-      params.set('cmp', next.join(','));
-      params.delete('cmpA');
-      params.delete('cmpB');
-      navigate(`/teacher/analytics?${params.toString()}`);
+  const cmpInputs = [...document.querySelectorAll('[data-cmp-class]')];
+  const cmpCount = document.querySelector('[data-cmp-count]');
+  const refreshCmpCount = () => { if (cmpCount) cmpCount.textContent = String(cmpInputs.filter(el => el.checked).length); };
+  cmpInputs.forEach(input => input.addEventListener('change', refreshCmpCount));
+  document.querySelector('[data-cmp-all]')?.addEventListener('click', () => {
+    cmpInputs.forEach(input => { input.checked = true; });
+    refreshCmpCount();
+  });
+  document.querySelector('[data-cmp-search]')?.addEventListener('input', (event) => {
+    const query = event.target.value.trim().toLowerCase();
+    document.querySelectorAll('.class-picker__option').forEach(option => {
+      option.hidden = query ? !option.innerText.toLowerCase().includes(query) : false;
     });
   });
-  document.querySelector('[data-cmp-all]')?.addEventListener('click', () => {
-    const all = [...document.querySelectorAll('[data-cmp-class]')].map(el => el.dataset.cmpClass);
-    if (!all.length) return;
+  document.querySelector('[data-cmp-apply]')?.addEventListener('click', () => {
+    const selected = cmpInputs.filter(el => el.checked).map(el => el.value);
+    if (!selected.length) return;
     const raw = (location.hash.split('?')[1] || '');
     const params = new URLSearchParams(raw);
-    params.set('cmp', all.join(','));
+    params.set('cmp', selected.join(','));
     params.delete('cmpA');
     params.delete('cmpB');
     navigate(`/teacher/analytics?${params.toString()}`);
