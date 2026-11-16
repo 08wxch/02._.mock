@@ -252,8 +252,7 @@ export function teacherDashboardView(ctx) {
 
   const content = `<div class="teacher-page-head">
     <div>
-      <div class="eyebrow">${icon('sparkles', 12)} ภาพรวมวันนี้ · ${thaiDate(today)}</div>
-      <h1>สวัสดี, ${e(teacher.name)}</h1>
+      <h1>${e(teacher.name)}</h1>
       <p>ทุกห้องสอบของคุณเป็นไปด้วยดี มีคำตอบใหม่ที่รอการตรวจ ${pending} รายการ</p>
     </div>
     <div class="teacher-page-head__actions">
