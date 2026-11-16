@@ -198,22 +198,46 @@ function scopeFor(ctx) {
   const boxValues = boxScored.map(row => row.score.percent);
   const boxExamTitle = boxExamId === 'all' ? 'ทุกชุดสอบ' : (exams.find(exam => exam.id === boxExamId)?.title || 'ชุดสอบ');
 
-  // Top-student filters: exam first, then the classes that actually appear in
-  // that exam. "all" means every class in the current organisation scope.
-  const examsWithAttempts = exams.filter(exam => scored.some(row => row.exam.id === exam.id));
+  // Top-student filters: school -> class -> exam.
+  // Owners can switch schools; staff outside the global scope see their own school fixed.
+  const topOrgOptions = owner ? orgs : orgs.filter(org => org.id === me.orgId);
+  const requestedTopOrg = queryValue(ctx, 'examOrg');
+  const topOrgId = owner
+    ? (requestedTopOrg === 'all' ? 'all' : topOrgOptions.some(org => org.id === requestedTopOrg) ? requestedTopOrg : (orgId !== 'all' ? orgId : 'all'))
+    : me.orgId;
+  const topOrgIds = new Set((topOrgId === 'all' ? topOrgOptions : topOrgOptions.filter(org => org.id === topOrgId)).map(org => org.id));
+  const topStudents = visibleStudents(session, db).filter(student => topOrgIds.has(student.orgId));
+  const topStudentIds = new Set(topStudents.map(student => student.id));
+  const topExams = visibleExams(session, db).filter(exam =>
+    examOrganizationIds(exam, db).some(id => topOrgIds.has(id)) && canViewExamStats(exam, session)
+  );
+  const topExamById = new Map(topExams.map(exam => [exam.id, exam]));
+  const topScored = db.attempts
+    .filter(attempt => attempt.status !== 'in_progress' && topExamById.has(attempt.examId) && topStudentIds.has(attempt.studentId))
+    .map(attempt => {
+      const exam = topExamById.get(attempt.examId);
+      return { attempt, exam, score: attemptScore(exam, attempt) };
+    });
+  const topExamOptions = topExams.filter(exam => topScored.some(row => row.exam.id === exam.id));
   const requestedTopExam = queryValue(ctx, 'exam');
-  const topExamId = examsWithAttempts.some(exam => exam.id === requestedTopExam) ? requestedTopExam : (examsWithAttempts[0]?.id || '');
-  const topExam = examsWithAttempts.find(exam => exam.id === topExamId) || null;
-  const topExamScored = scored.filter(row => row.exam.id === topExamId);
-  const topClassOptions = classes.filter(cls => topExamScored.some(row => {
-    const student = studentById.get(row.attempt.studentId);
-    return student && classIdsOf(student).includes(cls.id);
-  }));
+  const topExamId = topExamOptions.some(exam => exam.id === requestedTopExam) ? requestedTopExam : (topExamOptions[0]?.id || '');
+  const topExamScored = topScored.filter(row => row.exam.id === topExamId);
+  const topStudentById = new Map(topStudents.map(student => [student.id, student]));
+  const topClassOptions = visibleClasses(session, db)
+    .filter(cls => topOrgIds.has(cls.orgId))
+    .filter(cls => topExamScored.some(row => {
+      const student = topStudentById.get(row.attempt.studentId);
+      return student && classIdsOf(student).includes(cls.id);
+    }))
+    .map(cls => {
+      const org = findOrganization(cls.orgId, db);
+      return { ...cls, label: topOrgId === 'all' ? `${cls.code} · ${org?.shortName || org?.name || ''}` : cls.code };
+    });
   const requestedTopClass = queryValue(ctx, 'examClass');
   const topClassId = topClassOptions.some(cls => cls.id === requestedTopClass) ? requestedTopClass : 'all';
   const topPool = topExamScored.filter(row => {
     if (topClassId === 'all') return true;
-    const student = studentById.get(row.attempt.studentId);
+    const student = topStudentById.get(row.attempt.studentId);
     return student && classIdsOf(student).includes(topClassId);
   });
   const bestByStudent = new Map();
@@ -226,8 +250,8 @@ function scopeFor(ctx) {
   const topRows = [...bestByStudent.values()]
     .sort((a, b) => b.score.percent - a.score.percent || b.score.total - a.score.total)
     .slice(0, 5)
-    .map((row, index, list) => {
-      const student = studentById.get(row.attempt.studentId);
+    .map((row, index) => {
+      const student = topStudentById.get(row.attempt.studentId);
       return { student, row, rank: index + 1, classLabel: student ? studentClassLabel(student, db) : '—' };
     });
 
@@ -238,7 +262,7 @@ function scopeFor(ctx) {
     db, session, owner, me, orgs, orgId, classId, classes, students, exams, attempts, scored,
     average, passRate, passCount: passed, highest,
     studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel,
-    trendClassId, trendScored, topExamId, topExam, topExamScored, topExamOptions: examsWithAttempts, topClassOptions, topClassId, topRows,
+    trendClassId, trendScored, topOrgOptions, topOrgId, topExamId, topExamOptions, topClassOptions, topClassId, topRows,
     comparisonClasses, classStatIds, cmpIds, cmpRows,
     boxExamId, boxValues, boxExamTitle, boxExamOptions, boxExamOptionIds, boxCompare, boxCmpIds, boxSeries
   };
@@ -443,7 +467,7 @@ export function teacherAnalyticsView(ctx) {
       mount: () => mountTeacherShell(ctx.session)
     };
   }
-  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle, boxExamOptions, boxCompare, boxCmpIds, boxSeries } = scope;
+  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topOrgOptions, topOrgId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle, boxExamOptions, boxCompare, boxCmpIds, boxSeries } = scope;
   const rankingHref = `#/teacher/analytics/ranking${filterQuery(scope)}`;
   const content = `<div class="teacher-page-head">
     <div>
@@ -474,7 +498,7 @@ export function teacherAnalyticsView(ctx) {
   </div>
   <div class="analytics-columns">
     <section class="analytics-panel card">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('award', 11)} อันดับเด่น</span><h2>นักเรียนที่ทำคะแนนได้ดี</h2></div><div class="analytics-panel__filters analytics-panel__filters--stack"><label class="head-filter"><span>ชุดสอบ</span><select class="select select--compact" data-local-param="exam">${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === topExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></label><label class="head-filter"><span>class</span><select class="select select--compact" data-local-param="examClass"><option value="all" ${topClassId === 'all' ? 'selected' : ''}>ทุก class</option>${topClassOptions.map(cls => `<option value="${e(cls.id)}" ${cls.id === topClassId ? 'selected' : ''}>${e(cls.code)}</option>`).join('')}</select></label><a class="btn btn--link" href="${rankingHref}">ทั้งหมด ${icon('arrow-right', 12)}</a></div></div>
+      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('award', 11)} อันดับเด่น</span><h2>นักเรียนที่ทำคะแนนได้ดี</h2></div><div class="analytics-panel__filters analytics-panel__filters--stack">${owner ? `<label class="head-filter"><span>โรงเรียน</span><select class="select select--compact" data-local-param="examOrg"><option value="all" ${topOrgId === 'all' ? 'selected' : ''}>ทุกโรงเรียน</option>${topOrgOptions.map(org => `<option value="${e(org.id)}" ${org.id === topOrgId ? 'selected' : ''}>${e(org.shortName || org.name)}</option>`).join('')}</select></label>` : `<div class="head-filter"><span>โรงเรียน</span><div class="fixed-field"><strong>${e(findOrganization(topOrgId, db)?.shortName || findOrganization(topOrgId, db)?.name || 'โรงเรียนของฉัน')}</strong></div></div>`}<label class="head-filter"><span>class</span><select class="select select--compact" data-local-param="examClass"><option value="all" ${topClassId === 'all' ? 'selected' : ''}>ทุก class</option>${topClassOptions.map(cls => `<option value="${e(cls.id)}" ${cls.id === topClassId ? 'selected' : ''}>${e(cls.label)}</option>`).join('')}</select></label><label class="head-filter"><span>ชุดข้อสอบ</span><select class="select select--compact" data-local-param="exam">${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === topExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></label><a class="btn btn--link" href="${rankingHref}">ทั้งหมด ${icon('arrow-right', 12)}</a></div></div>
       ${topRows.length ? `<div class="analytics-mini-rank">
         ${topRows.map(row => `<a class="analytics-mini-row" href="#/teacher/student/${row.student.id}">
           <span class="analytics-mini-row__rank">${row.rank}</span>
@@ -578,6 +602,7 @@ function mountAnalyticsFilters() {
     const params = new URLSearchParams(raw);
     if (!value || value === 'all') params.delete(key); else params.set(key, value);
     if (key === 'exam') params.delete('examClass');
+    if (key === 'examOrg') { params.delete('examClass'); params.delete('exam'); }
     if (key === 'boxMode' && value === 'all') { params.delete('boxCmp'); params.delete('boxExam'); }
     const query = params.toString();
     navigate(`/teacher/analytics${query ? `?${query}` : ''}`);
