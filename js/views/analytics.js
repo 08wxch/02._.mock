@@ -578,6 +578,7 @@ function mountAnalyticsFilters() {
     const params = new URLSearchParams(raw);
     if (!value || value === 'all') params.delete(key); else params.set(key, value);
     if (key === 'exam') params.delete('examClass');
+    if (key === 'boxMode' && value === 'all') { params.delete('boxCmp'); params.delete('boxExam'); }
     const query = params.toString();
     navigate(`/teacher/analytics${query ? `?${query}` : ''}`);
   };

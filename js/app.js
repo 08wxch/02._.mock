@@ -12,7 +12,7 @@ import {
   teacherStudentView, teacherStudentExamView
 } from './views/teacher.js?v=20261117d';
 import { createExamView } from './views/createExam.js';
-import { teacherAnalyticsView, teacherAnalyticsRankingView } from './views/analytics.js?v=20261117f';
+import { teacherAnalyticsView, teacherAnalyticsRankingView } from './views/analytics.js?v=20261117g';
 import { closeModal, toast } from './ui.js';
 
 const app = document.getElementById('app');
