@@ -467,7 +467,7 @@ export function teacherAnalyticsView(ctx) {
       mount: () => mountTeacherShell(ctx.session)
     };
   }
-  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topOrgOptions, topOrgId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle, boxExamOptions, boxCompare, boxCmpIds, boxSeries } = scope;
+  const { owner, average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topOrgOptions, topOrgId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle, boxExamOptions, boxCompare, boxCmpIds, boxSeries } = scope;
   const rankingHref = `#/teacher/analytics/ranking${filterQuery(scope)}`;
   const content = `<div class="teacher-page-head">
     <div>
