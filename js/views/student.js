@@ -426,9 +426,9 @@ export function studentDashboardView(ctx) {
       </div>
       <div class="dashboard-grid">
         <div class="stack">
+          ${examPicker}
           ${spotlight}
           ${upcomingPanel}
-          ${examPicker}
           <section class="history-panel card">
             <div class="section-heading">
               <div><h2>ประวัติการสอบ</h2><p>ผลสอบและสถานะล่าสุดของคุณ</p></div>
