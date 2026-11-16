@@ -3409,3 +3409,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .class-picker__foot { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .class-picker__foot .btn { min-height: 29px; padding: 5px 9px; font-size: 8.5px; }
 @media (max-width: 760px) { .class-picker { width: 100%; } .class-picker__summary { width: 100%; justify-content: space-between; } .class-picker__panel { position: fixed; top: auto; right: 16px; left: 16px; width: auto; max-height: 70vh; } }
+
+.box-compare-list { display: grid; gap: 14px; }
+.box-compare-item { padding: 10px 0 0; border-top: 1px solid var(--line); }
+.box-compare-item:first-child { padding-top: 0; border-top: 0; }
+.box-compare-item h3 { margin: 0 0 2px; font-size: 10px; font-weight: 600; color: var(--ink); }

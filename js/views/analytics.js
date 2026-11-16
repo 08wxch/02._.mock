@@ -179,9 +179,21 @@ function scopeFor(ctx) {
   const cmpIds = requestedCmpIds.length ? [...new Set(requestedCmpIds)] : classStatIds.slice(0, 2);
   const cmpRows = cmpIds.map(id => comparisonClasses.find(row => row.id === id)).filter(Boolean);
 
-  // Box plot has its own exam filter; the five-number summary sits above it.
+  // Box plot can either merge every exam into one shape (the default) or
+  // compare selected exams as separate stacked box plots.
   const requestedBoxExam = queryValue(ctx, 'boxExam');
   const boxExamId = exams.some(exam => exam.id === requestedBoxExam && scored.some(row => row.exam.id === exam.id)) ? requestedBoxExam : 'all';
+  const boxExamOptions = exams.filter(exam => scored.some(row => row.exam.id === exam.id));
+  const boxExamOptionIds = boxExamOptions.map(exam => exam.id);
+  const requestedBoxCmp = queryValue(ctx, 'boxCmp');
+  const requestedBoxCmpIds = (requestedBoxCmp ? requestedBoxCmp.split(',') : []).filter(id => boxExamOptionIds.includes(id));
+  const boxCompare = queryValue(ctx, 'boxMode') === 'compare' || requestedBoxCmpIds.length > 0;
+  const boxCmpIds = requestedBoxCmpIds.length ? [...new Set(requestedBoxCmpIds)] : boxExamOptionIds.slice(0, 3);
+  const boxSeries = boxCmpIds.map(id => {
+    const exam = boxExamOptions.find(item => item.id === id);
+    const values = scored.filter(row => row.exam.id === id).map(row => row.score.percent);
+    return { id, title: exam?.title || 'ชุดสอบ', values };
+  });
   const boxScored = boxExamId === 'all' ? scored : scored.filter(row => row.exam.id === boxExamId);
   const boxValues = boxScored.map(row => row.score.percent);
   const boxExamTitle = boxExamId === 'all' ? 'ทุกชุดสอบ' : (exams.find(exam => exam.id === boxExamId)?.title || 'ชุดสอบ');
@@ -228,7 +240,7 @@ function scopeFor(ctx) {
     studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel,
     trendClassId, trendScored, topExamId, topExam, topExamScored, topExamOptions: examsWithAttempts, topClassOptions, topClassId, topRows,
     comparisonClasses, classStatIds, cmpIds, cmpRows,
-    boxExamId, boxValues, boxExamTitle
+    boxExamId, boxValues, boxExamTitle, boxExamOptions, boxExamOptionIds, boxCompare, boxCmpIds, boxSeries
   };
 }
 
@@ -431,7 +443,7 @@ export function teacherAnalyticsView(ctx) {
       mount: () => mountTeacherShell(ctx.session)
     };
   }
-  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle } = scope;
+  const { average, passRate, attempts, exams, students, studentRows, topics, classStats, examTrend, scoreValues, orgLabel, classLabel, trendClassId, topExamId, topExamOptions, topClassOptions, topClassId, topRows, comparisonClasses, cmpIds, cmpRows, boxExamId, boxValues, boxExamTitle, boxExamOptions, boxCompare, boxCmpIds, boxSeries } = scope;
   const rankingHref = `#/teacher/analytics/ranking${filterQuery(scope)}`;
   const content = `<div class="teacher-page-head">
     <div>
@@ -456,8 +468,8 @@ export function teacherAnalyticsView(ctx) {
       ${trendChart(examTrend)}
     </section>
     <section class="analytics-panel card analytics-chart-panel">
-      <div class="analytics-panel__head"><div><span class="eyebrow">${icon('bar-chart', 11)} การกระจายคะแนน</span><h2>ช่วงคะแนนของนักเรียน</h2></div><div class="analytics-panel__filters"><label class="head-filter"><span>ชุดข้อสอบ</span><select class="select select--compact" data-local-param="boxExam"><option value="all" ${boxExamId === 'all' ? 'selected' : ''}>ทุกชุด</option>${topExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === boxExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></label><span class="badge badge--neutral">${boxValues.length} ครั้ง</span></div></div>
-      ${boxPlot(boxValues, boxExamTitle)}
+      <div class="analytics-panel__head analytics-panel__head--wrap"><div><span class="eyebrow">${icon('bar-chart', 11)} การกระจายคะแนน</span><h2>ช่วงคะแนนของนักเรียน</h2></div><div class="analytics-panel__filters"><label class="head-filter"><span>การแสดงผล</span><select class="select select--compact" data-local-param="boxMode"><option value="all" ${!boxCompare ? 'selected' : ''}>รวมทุกชุด</option><option value="compare" ${boxCompare ? 'selected' : ''}>เปรียบเทียบรายชุด</option></select></label>${boxCompare ? `<details class="class-picker"><summary class="class-picker__summary">เลือกชุดข้อสอบ <span class="class-picker__count" data-box-count>${boxCmpIds.length}</span></summary><div class="class-picker__panel"><div class="class-picker__list" role="group" aria-label="เลือกชุดข้อสอบที่จะเปรียบเทียบ">${boxExamOptions.map(exam => `<label class="class-picker__option"><input type="checkbox" data-box-exam value="${e(exam.id)}" ${boxCmpIds.includes(exam.id) ? 'checked' : ''}><span>${e(exam.title)}</span></label>`).join('')}</div><div class="class-picker__foot"><button type="button" class="btn btn--ghost btn--sm" data-box-all>เลือกทั้งหมด</button><button type="button" class="btn btn--primary btn--sm" data-box-apply>ใช้ที่เลือก</button></div></div></details>` : `<label class="head-filter"><span>ชุดข้อสอบ</span><select class="select select--compact" data-local-param="boxExam"><option value="all" ${boxExamId === 'all' ? 'selected' : ''}>ทุกชุด</option>${boxExamOptions.map(ex => `<option value="${e(ex.id)}" ${ex.id === boxExamId ? 'selected' : ''}>${e(ex.title)}</option>`).join('')}</select></label>`}<span class="badge badge--neutral">${boxCompare ? `${boxCmpIds.length} ชุด` : `${boxValues.length} ครั้ง`}</span></div></div>
+      ${boxCompare ? (boxSeries.length ? `<div class="box-compare-list">${boxSeries.map(series => `<section class="box-compare-item"><h3>${e(series.title)}</h3>${boxPlot(series.values, series.title)}</section>`).join('')}</div>` : `<div class="analytics-empty analytics-empty--chart">${icon('bar-chart', 22)}<span>ยังไม่มีคะแนนสำหรับชุดข้อสอบที่เลือก</span></div>`) : boxPlot(boxValues, boxExamTitle)}
     </section>
   </div>
   <div class="analytics-columns">
@@ -573,6 +585,24 @@ function mountAnalyticsFilters() {
     select.addEventListener('change', () => setLocalParam(select.dataset.localParam, select.value));
   });
 
+  const boxInputs = [...document.querySelectorAll('[data-box-exam]')];
+  const boxCount = document.querySelector('[data-box-count]');
+  const refreshBoxCount = () => { if (boxCount) boxCount.textContent = String(boxInputs.filter(el => el.checked).length); };
+  boxInputs.forEach(input => input.addEventListener('change', refreshBoxCount));
+  document.querySelector('[data-box-all]')?.addEventListener('click', () => {
+    boxInputs.forEach(input => { input.checked = true; });
+    refreshBoxCount();
+  });
+  document.querySelector('[data-box-apply]')?.addEventListener('click', () => {
+    const selected = boxInputs.filter(el => el.checked).map(el => el.value);
+    if (!selected.length) return;
+    const raw = (location.hash.split('?')[1] || '');
+    const params = new URLSearchParams(raw);
+    params.set('boxMode', 'compare');
+    params.set('boxCmp', selected.join(','));
+    params.delete('boxExam');
+    navigate(`/teacher/analytics?${params.toString()}`);
+  });
   const cmpInputs = [...document.querySelectorAll('[data-cmp-class]')];
   const cmpCount = document.querySelector('[data-cmp-count]');
   const refreshCmpCount = () => { if (cmpCount) cmpCount.textContent = String(cmpInputs.filter(el => el.checked).length); };
