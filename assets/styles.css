@@ -2955,7 +2955,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .analytics-stat__detail { font-size: 8px; line-height: 1.5; color: var(--muted); }
 .analytics-stat--hero .analytics-stat__detail { color: rgba(255,255,255,.62); }
 .analytics-stat__cta { margin-top: auto; padding-top: 9px; display: inline-flex; align-items: center; gap: 4px; font-size: 8.5px; font-weight: 500; color: rgba(255,255,255,.85); }
-.analytics-columns { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 15px; }
+.analytics-columns { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(250px, 1fr); gap: 14px; margin-bottom: 15px; }
 .analytics-panel { padding: 15px; }
 .analytics-panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
 .analytics-panel__head h2 { margin-top: 3px; font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
@@ -2974,7 +2974,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .analytics-role span { display: inline-flex; align-items: center; gap: 6px; font-size: 8.5px; color: var(--muted); }
 .analytics-role strong { font-size: 13px; font-weight: 600; }
 .analytics-role strong small { font-size: 7.5px; font-weight: 400; color: var(--muted); }
-.analytics-topic-list { display: grid; grid-template-columns: 1fr; gap: 9px; }
+.analytics-topic-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; }
 .analytics-topic { display: grid; gap: 4px; padding: 7px 0; }
 .analytics-topic__top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .analytics-topic__top strong { font-size: 9.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3363,7 +3363,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .analytics-local-filters .field { min-width: 130px; flex: 1; }
 }
 .analytics-box-chart { height: auto; }
-.analytics-chart-grid { grid-template-columns: 1fr; }
+.analytics-chart-grid { grid-template-columns: 1fr 1fr; }
 @media (max-width: 1100px) { .analytics-chart-grid { grid-template-columns: 1fr; } }
 .box-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px 8px; padding: 6px 2px 0; font-size: 9px; }
 .box-summary span { display: block; white-space: nowrap; }
