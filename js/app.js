@@ -5,14 +5,14 @@ import { authView } from './views/auth.js';
 import {
   studentDashboardView, instructionsView, examView, successView,
   resultView, historyView
-} from './views/student.js?v=20261117c';
+} from './views/student.js?v=20261117d';
 import {
   teacherDashboardView, teacherExamsView, teacherExamView, teacherExamPreviewView,
   teacherAnswerView, teacherReviewView, teacherStudentsView, teacherStaffView,
   teacherStudentView, teacherStudentExamView
-} from './views/teacher.js';
+} from './views/teacher.js?v=20261117d';
 import { createExamView } from './views/createExam.js';
-import { teacherAnalyticsView, teacherAnalyticsRankingView } from './views/analytics.js';
+import { teacherAnalyticsView, teacherAnalyticsRankingView } from './views/analytics.js?v=20261117d';
 import { closeModal, toast } from './ui.js';
 
 const app = document.getElementById('app');

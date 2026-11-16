@@ -166,7 +166,7 @@ function scopeFor(ctx) {
     .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
     .slice(-8);
 
-  // Local comparison filters: pick any two classes in the current scope.
+  // Local comparison filters: any number of classes in the current scope can be compared.
   // Classes without attempts remain selectable and show an em dash.
   const comparisonClasses = classes.map(cls => classStats.find(row => row.id === cls.id) || {
     id: cls.id, label: classNameOf(cls), average: null, attempts: 0, passRate: null, students: 0
@@ -412,7 +412,7 @@ function classCompare(rows) {
   return `<div class="class-compare-grid">${rows.map((row, index) => {
     const value = row.average === null ? null : Number(row.average);
     return `<div class="class-compare-card">
-    <span class="class-compare-card__tag">class ${index ? 'B' : 'A'}</span>
+    <span class="class-compare-card__tag">class ${index < 26 ? String.fromCharCode(65 + index) : index + 1}</span>
     <div class="class-compare-card__top"><strong>${e(row.label)}</strong><b>${value === null ? '—' : `${value}%`}</b></div>
     <div class="class-compare-card__bar"><span style="width:${value === null ? 0 : value}%"></span></div>
     <small>${row.students} คน · ${row.attempts} ครั้ง · ${row.passRate === null ? 'ยังไม่มีผล' : `ผ่าน ${row.passRate}%`}</small>
@@ -473,7 +473,7 @@ export function teacherAnalyticsView(ctx) {
       </div>` : `<div class="analytics-empty">${icon('bar-chart', 22)}<span>ยังไม่มีผลสอบที่ส่งแล้วในขอบเขตนี้</span></div>`}
     </section>
     <section class="analytics-panel card">
-      <div class="analytics-panel__head analytics-panel__head--wrap"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><div class="analytics-panel__filters"><div class="class-filter-chips" role="group" aria-label="เลือก class ที่จะเปรียบเทียบ">${comparisonClasses.map(row => `<button type="button" class="class-filter-chip ${cmpIds.includes(row.id) ? 'is-active' : ''}" data-cmp-class="${e(row.id)}">${e(row.label)}</button>`).join('')}</div><span class="badge badge--neutral">${cmpIds.length} class</span></div></div>
+      <div class="analytics-panel__head analytics-panel__head--wrap"><div><span class="eyebrow">${icon('school', 11)} เปรียบเทียบราย class</span><h2>คะแนนเฉลี่ยราย class</h2></div><div class="analytics-panel__filters"><div class="class-filter-chips" role="group" aria-label="เลือก class ที่จะเปรียบเทียบ">${comparisonClasses.map(row => `<button type="button" class="class-filter-chip ${cmpIds.includes(row.id) ? 'is-active' : ''}" data-cmp-class="${e(row.id)}">${e(row.label)}</button>`).join('')}<button type="button" class="class-filter-chip class-filter-chip--all" data-cmp-all>เลือกทั้งหมด</button></div><span class="badge badge--neutral">${cmpIds.length} class</span></div></div>
       ${classCompare(cmpRows)}
     </section>
   </div>
@@ -586,5 +586,15 @@ function mountAnalyticsFilters() {
       params.delete('cmpB');
       navigate(`/teacher/analytics?${params.toString()}`);
     });
+  });
+  document.querySelector('[data-cmp-all]')?.addEventListener('click', () => {
+    const all = [...document.querySelectorAll('[data-cmp-class]')].map(el => el.dataset.cmpClass);
+    if (!all.length) return;
+    const raw = (location.hash.split('?')[1] || '');
+    const params = new URLSearchParams(raw);
+    params.set('cmp', all.join(','));
+    params.delete('cmpA');
+    params.delete('cmpB');
+    navigate(`/teacher/analytics?${params.toString()}`);
   });
 }
